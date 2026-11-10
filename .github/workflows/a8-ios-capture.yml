@@ -1,0 +1,29 @@
+# Builds the J96 (A8) iPadOS capture tools in tools/a8/ios-capture.
+# Manual runs only.
+name: J96 iOS capture tools
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build
+        working-directory: tools/a8/ios-capture
+        run: |
+          xcodebuild -version
+          brew install --force-bottle ldid
+          sh build.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: j96-ios-capture
+          path: tools/a8/ios-capture/build/
+          retention-days: 14
+          if-no-files-found: error

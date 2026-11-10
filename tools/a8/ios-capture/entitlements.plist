@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>platform-application</key><true/>
+    <key>com.apple.private.security.no-container</key><true/>
+    <key>com.apple.private.security.no-sandbox</key><true/>
+    <key>get-task-allow</key><true/>
+    <key>dynamic-codesigning</key><true/>
+    <!-- Kernel task port for kprobe (only effective where the jailbreak's kernel patches allow it). -->
+    <key>task_for_pid-allow</key><true/>
+    <key>com.apple.system-task-ports</key><true/>
+    <!-- Without these, opening the accelerator returns kIOReturnNotPermitted
+         and MTLCreateSystemDefaultDevice() is nil (A10 finding; unverified on A8 / iPadOS 15). -->
+    <key>com.apple.security.iokit-user-client-class</key>
+    <array>
+        <string>AGXDeviceUserClient</string>
+        <string>IOGPUDeviceUserClient</string>
+        <string>IOSurfaceRootUserClient</string>
+        <string>IOAccelDevice</string>
+        <string>IOAccelDevice2</string>
+        <string>IOAccelSharedUserClient2</string>
+    </array>
+</dict></plist>
