@@ -1,8 +1,11 @@
 # Builds the J96 (A8) iPadOS capture tools in tools/a8/ios-capture.
-# Manual runs only.
+# Runs on pushes to the a8-ios-capture branch that touch the tools, and by hand.
 name: J96 iOS capture tools
 on:
   workflow_dispatch:
+  push:
+    branches: ['a8-ios-capture']
+    paths: ['tools/a8/ios-capture/**', '.github/workflows/a8-ios-capture.yml']
 permissions:
   contents: read
 jobs:

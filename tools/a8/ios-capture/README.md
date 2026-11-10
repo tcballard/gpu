@@ -37,7 +37,8 @@ Ground truth from iPadOS 15.8.3 on the iPad mini 4 (J96, A8), for two questions:
 
 ## Build (no Mac: CI)
 
-Run the `J96 iOS capture tools` workflow by hand (Actions tab) and download the
+The `J96 iOS capture tools` workflow runs on each push to this branch (or by hand from the
+Actions tab). Download its
 `j96-ios-capture` artifact. Check `SHA256SUMS`. On a Mac: `sh build.sh`.
 
 ## Run (iPad)
