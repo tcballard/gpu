@@ -18,6 +18,7 @@ Ground truth from iPadOS 15.8.3 on the iPad mini 4 (J96, A8), for two questions:
 | `kprobe.c` | Read-only kernel-memory probe: `task_for_pid(0)`, then host special port 4; finds the kernel slide by reading the Mach-O magic; `kprobe read ADDR LEN` hex-dumps kernel virtual memory | new |
 | `capture.m`, `iohook.m`, `app.m` | Metal compute/render jobs, then dumps of the process's GPU-shared memory and its IOKit calls | copied unchanged from OrchardLinux/gpu `tools/a10/ios-capture` at the commit in `UPSTREAM-COMMIT` (GPL-2.0-or-later) |
 | `entitlements.plist` | The A10 set plus `task_for_pid-allow`, `com.apple.system-task-ports` and the older IOAccel user-client names | adapted |
+| `session.py` | Host side: SSH key through palera1n's telnetd, key-only dropbear on the iPad's loopback, then push/run/pull over usbmux | adapted from the A10 `session.py` |
 | `build.sh` | Builds all three for `arm64-apple-ios15.0`, strips, signs ad hoc with `ldid` | adapted (the A10 scripts target iOS 16) |
 | `../../../.github/workflows/a8-ios-capture.yml` | GitHub Actions workflow (macOS runner, manual trigger) that runs `build.sh` and uploads `build/` | new, modelled on resize-apfs `j96-ios15.yml` |
 
@@ -46,13 +47,15 @@ Actions tab). Download its
 - **Rootless only** (`palera1n -l`, the default). Never `-f`, `-c` or `-B`: they create or
   use a fakefs volume in the APFS container, and this iPad's storage is repartitioned for
   Linux.
-- Get the binaries onto the iPad as the A10 work did (a palera1n overlay, or the binpack's
-  root telnetd with `palera1n -T` and `iproxy`; see upstream `overlay.py` and `session.py`,
-  not yet ported), then as root:
+- Boot with `palera1n -l -T` (root telnetd on port 46), put the CI artifact in `build/`,
+  then from the host (`session.py`, adapted from the A10 one; needs `iproxy` and `ssh`):
   ```sh
-  /var/tmp/kprobe                    # RESULT line says whether kernel memory is readable
-  /var/tmp/gpu-capture --light       # shared-region snapshot of one compute kernel
+  ./session.py kprobe               # push build/kprobe and run it; the RESULT line says
+                                    # whether kernel memory is readable
+  ./session.py shell 'uname -a'     # any root command
   ```
+  `gpu-capture` is not ready for iPadOS 15: it calls `gpuAddress` and `gpuResourceID`,
+  which need iOS 16.
 - `kprobe` never writes kernel memory. Do not point `kprobe read` at a device (MMIO) address.
 
 Apple data (dumps, captured shaders) stays out of any repository.
