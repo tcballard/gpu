@@ -1,0 +1,141 @@
+# J96 GPU: Fender scan, 2026-11-10 ~10:24 iPad time, boot afe25dc2 (fresh j96-boot)
+# Module gpu/probe/apple-j96-gpubridge.ko sha256 37787778...421794, token gpu-fender-scan.
+# ps_gfx forced on, 33 bridge writes, scan A (before any Fender write), 12 s pause, the three Fender
+# probe writes, GPC 1 (perf=0x1), scan B, GPC 0, off. RESULT: completed, result=0; iPad stayed up.
+#
+# Findings:
+# - Every scanned offset is readable: +0x0-0x3c, +0x1000-0x11fc, +0x2000-0x203c, +0x3000-0x303c,
+#   +0x4000-0x403c, +0x10000-0x1001c, +0x20000-0x2003c (first reads of all but seven).
+# - Scan A: all zero except the sequencer window +0x10000.
+# - Scan B: the same, plus the values our writes set or the transition raised: +0x0 = 0x40000000,
+#   +0x14 = 0x2, +0x1000 = 0x1. No other register changed with the GPC 0 -> 1 transition.
+# - +0x1000-0x11fc is all zero apart from PERF_CONTROL: no per-state clock/voltage table there, at
+#   either point. Same for the 0x2000/0x3000/0x4000 samples.
+# - Sequencer window +0x10000.., identical in A and B: ffff0000 00000000 61029442 00000060 cbf3fc79
+#   96db7dd4 024b0081 199e0138. +0x10000 already read 0xffff0000 BEFORE this run's own write (first
+#   run this boot). The words after it look random: likely SRAM that keeps its contents (left by an
+#   earlier write: a previous boot's probe, or the bootloader), not reset by a ps_gfx power cycle.
+#
+[   77.826803] J96GB_READY ps_gfx=0x00000300; bridge probe available (see 'attempt')
+[   77.855608] J96GB_TEST kernel console line - the screen is ready
+[  148.063122] J96GB_BEGIN gpu-fender-scan (no RGX access)
+[  148.069351] J96GB_NEXT pmgr ps_gfx set target 0xf and poll
+[  148.389480] J96GB_PS gfx target 0xf -> reg 0x000003ff
+[  148.395579] J96GB_NEXT write the 33 bridge registers, no pauses
+[  148.705494] J96GB_NEXT scan A-powered: read Fender+0x00000..+0x0001c
+[  149.025489] J96GB_FS A-powered +0x00000: all 8 zero
+[  149.031298] J96GB_NEXT scan A-powered: read Fender+0x00020..+0x0003c
+[  149.345476] J96GB_FS A-powered +0x00020: all 8 zero
+[  149.351290] J96GB_NEXT scan A-powered: read Fender+0x01000..+0x0101c
+[  149.669475] J96GB_FS A-powered +0x01000: all 8 zero
+[  149.675293] J96GB_NEXT scan A-powered: read Fender+0x01020..+0x0103c
+[  149.989472] J96GB_FS A-powered +0x01020: all 8 zero
+[  149.995286] J96GB_NEXT scan A-powered: read Fender+0x01040..+0x0105c
+[  150.309472] J96GB_FS A-powered +0x01040: all 8 zero
+[  150.315287] J96GB_NEXT scan A-powered: read Fender+0x01060..+0x0107c
+[  150.629473] J96GB_FS A-powered +0x01060: all 8 zero
+[  150.635287] J96GB_NEXT scan A-powered: read Fender+0x01080..+0x0109c
+[  150.945568] J96GB_FS A-powered +0x01080: all 8 zero
+[  150.951384] J96GB_NEXT scan A-powered: read Fender+0x010a0..+0x010bc
+[  151.265473] J96GB_FS A-powered +0x010a0: all 8 zero
+[  151.271286] J96GB_NEXT scan A-powered: read Fender+0x010c0..+0x010dc
+[  151.585483] J96GB_FS A-powered +0x010c0: all 8 zero
+[  151.591289] J96GB_NEXT scan A-powered: read Fender+0x010e0..+0x010fc
+[  151.905474] J96GB_FS A-powered +0x010e0: all 8 zero
+[  151.911287] J96GB_NEXT scan A-powered: read Fender+0x01100..+0x0111c
+[  152.225478] J96GB_FS A-powered +0x01100: all 8 zero
+[  152.231288] J96GB_NEXT scan A-powered: read Fender+0x01120..+0x0113c
+[  152.545473] J96GB_FS A-powered +0x01120: all 8 zero
+[  152.551288] J96GB_NEXT scan A-powered: read Fender+0x01140..+0x0115c
+[  152.865474] J96GB_FS A-powered +0x01140: all 8 zero
+[  152.871287] J96GB_NEXT scan A-powered: read Fender+0x01160..+0x0117c
+[  153.185473] J96GB_FS A-powered +0x01160: all 8 zero
+[  153.191291] J96GB_NEXT scan A-powered: read Fender+0x01180..+0x0119c
+[  153.505473] J96GB_FS A-powered +0x01180: all 8 zero
+[  153.511285] J96GB_NEXT scan A-powered: read Fender+0x011a0..+0x011bc
+[  153.825480] J96GB_FS A-powered +0x011a0: all 8 zero
+[  153.831285] J96GB_NEXT scan A-powered: read Fender+0x011c0..+0x011dc
+[  154.145472] J96GB_FS A-powered +0x011c0: all 8 zero
+[  154.151282] J96GB_NEXT scan A-powered: read Fender+0x011e0..+0x011fc
+[  154.465476] J96GB_FS A-powered +0x011e0: all 8 zero
+[  154.471291] J96GB_NEXT scan A-powered: read Fender+0x20000..+0x2001c
+[  154.785473] J96GB_FS A-powered +0x20000: all 8 zero
+[  154.791283] J96GB_NEXT scan A-powered: read Fender+0x20020..+0x2003c
+[  155.105473] J96GB_FS A-powered +0x20020: all 8 zero
+[  155.111290] J96GB_NEXT scan A-powered: read Fender+0x10000..+0x1001c
+[  155.425471] J96GB_FS A-powered +0x10000: ffff0000 00000000 61029442 00000060 cbf3fc79 96db7dd4 024b0081 199e0138
+[  155.436647] J96GB_NEXT scan A-powered: read Fender+0x02000..+0x0201c
+[  155.781468] J96GB_FS A-powered +0x02000: all 8 zero
+[  155.787293] J96GB_NEXT scan A-powered: read Fender+0x02020..+0x0203c
+[  156.101471] J96GB_FS A-powered +0x02020: all 8 zero
+[  156.107287] J96GB_NEXT scan A-powered: read Fender+0x03000..+0x0301c
+[  156.449501] J96GB_FS A-powered +0x03000: all 8 zero
+[  156.455556] J96GB_NEXT scan A-powered: read Fender+0x03020..+0x0303c
+[  156.769497] J96GB_FS A-powered +0x03020: all 8 zero
+[  156.775508] J96GB_NEXT scan A-powered: read Fender+0x04000..+0x0401c
+[  157.089480] J96GB_FS A-powered +0x04000: all 8 zero
+[  157.095306] J96GB_NEXT scan A-powered: read Fender+0x04020..+0x0403c
+[  157.409583] J96GB_FS A-powered +0x04020: all 8 zero
+[  157.415658] J96GB_NEXT scan A done: PHOTOGRAPH THE SCREEN NOW, 12 s pause
+[  169.441475] J96GB_NEXT write Fender+0x10000 = 0xffff0000
+[  169.761470] J96GB_NEXT write Fender+0x0 = 0x40000000
+[  170.081467] J96GB_NEXT write Fender+0x1000 = 0x11 and poll bit 4
+[  170.401781] J96GB_GPC perf=00000001 after the state 1 request
+[  170.408483] J96GB_NEXT scan B-gpc1: read Fender+0x00000..+0x0001c
+[  170.721470] J96GB_FS B-gpc1 +0x00000: 40000000 00000000 00000000 00000000 00000000 00000002 00000000 00000000
+[  170.732397] J96GB_NEXT scan B-gpc1: read Fender+0x00020..+0x0003c
+[  171.073471] J96GB_FS B-gpc1 +0x00020: all 8 zero
+[  171.079035] J96GB_NEXT scan B-gpc1: read Fender+0x01000..+0x0101c
+[  171.393472] J96GB_FS B-gpc1 +0x01000: 00000001 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  171.404394] J96GB_NEXT scan B-gpc1: read Fender+0x01020..+0x0103c
+[  171.749472] J96GB_FS B-gpc1 +0x01020: all 8 zero
+[  171.755205] J96GB_NEXT scan B-gpc1: read Fender+0x01040..+0x0105c
+[  172.069465] J96GB_FS B-gpc1 +0x01040: all 8 zero
+[  172.075025] J96GB_NEXT scan B-gpc1: read Fender+0x01060..+0x0107c
+[  172.389465] J96GB_FS B-gpc1 +0x01060: all 8 zero
+[  172.395020] J96GB_NEXT scan B-gpc1: read Fender+0x01080..+0x0109c
+[  172.709468] J96GB_FS B-gpc1 +0x01080: all 8 zero
+[  172.715021] J96GB_NEXT scan B-gpc1: read Fender+0x010a0..+0x010bc
+[  173.029468] J96GB_FS B-gpc1 +0x010a0: all 8 zero
+[  173.035022] J96GB_NEXT scan B-gpc1: read Fender+0x010c0..+0x010dc
+[  173.349470] J96GB_FS B-gpc1 +0x010c0: all 8 zero
+[  173.355021] J96GB_NEXT scan B-gpc1: read Fender+0x010e0..+0x010fc
+[  173.669471] J96GB_FS B-gpc1 +0x010e0: all 8 zero
+[  173.675019] J96GB_NEXT scan B-gpc1: read Fender+0x01100..+0x0111c
+[  173.989464] J96GB_FS B-gpc1 +0x01100: all 8 zero
+[  173.995013] J96GB_NEXT scan B-gpc1: read Fender+0x01120..+0x0113c
+[  174.309466] J96GB_FS B-gpc1 +0x01120: all 8 zero
+[  174.315013] J96GB_NEXT scan B-gpc1: read Fender+0x01140..+0x0115c
+[  174.629466] J96GB_FS B-gpc1 +0x01140: all 8 zero
+[  174.635014] J96GB_NEXT scan B-gpc1: read Fender+0x01160..+0x0117c
+[  174.949467] J96GB_FS B-gpc1 +0x01160: all 8 zero
+[  174.955018] J96GB_NEXT scan B-gpc1: read Fender+0x01180..+0x0119c
+[  175.269466] J96GB_FS B-gpc1 +0x01180: all 8 zero
+[  175.275015] J96GB_NEXT scan B-gpc1: read Fender+0x011a0..+0x011bc
+[  175.589466] J96GB_FS B-gpc1 +0x011a0: all 8 zero
+[  175.595018] J96GB_NEXT scan B-gpc1: read Fender+0x011c0..+0x011dc
+[  175.909463] J96GB_FS B-gpc1 +0x011c0: all 8 zero
+[  175.915012] J96GB_NEXT scan B-gpc1: read Fender+0x011e0..+0x011fc
+[  176.229459] J96GB_FS B-gpc1 +0x011e0: all 8 zero
+[  176.235006] J96GB_NEXT scan B-gpc1: read Fender+0x20000..+0x2001c
+[  176.549465] J96GB_FS B-gpc1 +0x20000: all 8 zero
+[  176.555015] J96GB_NEXT scan B-gpc1: read Fender+0x20020..+0x2003c
+[  176.869464] J96GB_FS B-gpc1 +0x20020: all 8 zero
+[  176.875012] J96GB_NEXT scan B-gpc1: read Fender+0x10000..+0x1001c
+[  177.189472] J96GB_FS B-gpc1 +0x10000: ffff0000 00000000 61029442 00000060 cbf3fc79 96db7dd4 024b0081 199e0138
+[  177.200392] J96GB_NEXT scan B-gpc1: read Fender+0x02000..+0x0201c
+[  177.541470] J96GB_FS B-gpc1 +0x02000: all 8 zero
+[  177.547019] J96GB_NEXT scan B-gpc1: read Fender+0x02020..+0x0203c
+[  177.857466] J96GB_FS B-gpc1 +0x02020: all 8 zero
+[  177.863016] J96GB_NEXT scan B-gpc1: read Fender+0x03000..+0x0301c
+[  178.177471] J96GB_FS B-gpc1 +0x03000: all 8 zero
+[  178.183044] J96GB_NEXT scan B-gpc1: read Fender+0x03020..+0x0303c
+[  178.501466] J96GB_FS B-gpc1 +0x03020: all 8 zero
+[  178.507018] J96GB_NEXT scan B-gpc1: read Fender+0x04000..+0x0401c
+[  178.821479] J96GB_FS B-gpc1 +0x04000: all 8 zero
+[  178.827019] J96GB_NEXT scan B-gpc1: read Fender+0x04020..+0x0403c
+[  179.141465] J96GB_FS B-gpc1 +0x04020: all 8 zero
+[  179.147018] J96GB_NEXT read Fender+0x1000, then write 0x10 and poll bit 4
+[  179.461514] J96GB_NEXT pmgr ps_gfx set target 0x0 and poll
+[  179.781472] J96GB_PS gfx target 0x0 -> reg 0x00000300
+[  179.787461] J96GB_STOP gpu-fender-scan result=0

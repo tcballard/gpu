@@ -1,0 +1,50 @@
+gpu-step1-ps available
+gpu-step2-fender-read available
+gpu-step3-fender-gpc available
+gpu-power-id-probe available
+[    0.635293] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_READY ps_gfx=0x00000300; staged probe available (see 'attempt')
+step1 exit 0
+[    0.635293] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_READY ps_gfx=0x00000300; staged probe available (see 'attempt')
+[  161.319259] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_BEGIN stage 1 (gpu-step1-ps)
+[  161.324479] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT pmgr ps_gfx set target 0xf and poll
+[  161.661215] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_PS gfx target 0xf -> reg 0x000003ff
+[  161.667137] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT pmgr ps_gfx set target 0x0 and poll
+[  161.981082] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_PS gfx target 0x0 -> reg 0x00000300
+[  161.986901] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_STOP stage 1 result=0
+step3 exit 0
+[ 1063.698791] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT pmgr ps_gfx set target 0xf and poll
+[ 1064.008762] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_PS gfx target 0xf -> reg 0x000003ff
+[ 1064.014588] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT read Fender+0x1000
+[ 1064.328743] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_FENDER powered perf=00000000
+[ 1064.333950] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT write Fender+0x10000 = 0xffff0000
+[ 1064.648746] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT write Fender+0x0 = 0x40000000
+[ 1064.968752] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT write Fender+0x1000 = 0x11 and poll bit 4
+[ 1065.289040] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_GPC1 reached (0x00000001)
+[ 1065.294075] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT write Fender+0x1000 = 0x10 and poll bit 4
+[ 1065.608795] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_NEXT pmgr ps_gfx set target 0x0 and poll
+[ 1065.928856] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_PS gfx target 0x0 -> reg 0x00000300
+[ 1065.934681] apple-j96-gpuprobe 201000000.gpu-probe: J96GP_STOP stage 3 result=0
+
+# 2026-11-08 ~21:50 GMT, boot 7deca358 (kernel 7.3.0-rc1-j96-firstboot+), staged driver
+# stage 4 (gpu-power-id-probe) run from a fresh boot with all four stages "available"; sync first.
+# Result: SoC froze, as in the first full M1 run (3 Nov). No serial output came back (the
+# sysfs write never returned); ping 10.96.0.2 and the ttyGS0 console stopped answering; USB
+# stayed enumerated (05ac:4142). Stages 1 and 3 pass on their own, so the freeze is in the
+# path stage 3 does not take: udelay(10) then readl(RGX+0x20) / readl(RGX+0x18).
+# Last J96GP_NEXT line: not seen. The Omarchy desktop was on screen and stayed there (frozen),
+# so the KERN_EMERG lines on tty0 were hidden. Next time: stop the desktop (text console in
+# front) or send the console to the host (netconsole over usb0) before running a stage.
+
+# 2026-11-08 ~22:15 GMT, boot fe8d8e4c (fresh DFU boot), staged driver, stage 4 again
+# Desktop stopped first (systemctl stop getty@tty1), tty1 text console in front, blanking off
+# (ESC[9;0]), kernel console test line confirmed visible on the iPad screen by the user.
+# Result: SoC froze again (no serial, no ping). Last line on the iPad screen, confirmed by the user:
+#   J96GP_NEXT write Fender+0x1000 = 0x11 and poll bit 4, then at once read RGX+0x20 and RGX+0x18
+# No J96GP_ABORT and no J96GP_ID line. Stage 3 completes this same write and poll every time, so
+# the hang is the first RGX read (readl RGX+0x20, 10 us after Fender reports GPC state 1).
+# CONFIRMED: Fender GPC1 is not enough for the RGX CR window to answer. Next: a stage with no RGX
+# access that, at GPC1, dumps the seven Fender registers and the GFX clock/power-gate state.
+
+# 2026-11-09: follow-up without RGX access, see m1-gpc1-dump-20261109.log (module in probe/).
+# Fender and ps_gfx show their final GPC 1 state at once and nothing changes over 1 s, so the RGX
+# hang is not a timing problem visible in Fender; something outside these registers is missing.

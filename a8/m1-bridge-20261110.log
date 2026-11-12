@@ -1,0 +1,77 @@
+# J96 GPU: bridge-settings probe, 2026-11-10 ~06:15 GMT, boot 04abcd38 (fresh j96-boot)
+# Kernel 7.3.0-rc1-j96-firstboot+ (config hash matches dev-image/artifacts/kernel.config).
+# Module gpu/probe/apple-j96-gpubridge.ko sha256 1cd33ac9...01ffa8, loaded after unbinding the built-in
+# apple-j96-gpuprobe. Desktop stopped, tty1 console in front. /proc/iomem showed both bridge windows
+# claimed (201f00000-201f00fff gfx-bridge10, 201f80000-201f80fff gfx-bridge11).
+#
+# Run 1: gpu-bridge-write (ps_gfx forced on, the 33 bridge writes each announced, ps_gfx off).
+# RESULT: completed, result=0. All 33 announce lines were in dmesg. The writes are survivable.
+[  171.136962] J96GB_BEGIN gpu-bridge-write
+[  171.141854] J96GB_NEXT pmgr ps_gfx set target 0xf and poll
+[  171.461519] J96GB_PS gfx target 0xf -> reg 0x000003ff
+[  171.781488] J96GB_BRIDGE 10: 1 write(s) done
+[  182.021465] J96GB_BRIDGE 11: 32 write(s) done
+[  182.026755] J96GB_NEXT pmgr ps_gfx set target 0x0 and poll
+[  182.341475] J96GB_PS gfx target 0x0 -> reg 0x00000300
+[  182.347465] J96GB_STOP gpu-bridge-write result=0
+#
+# Run 2: gpu-bridge-id (same boot; ps_gfx forced on, the 33 bridge writes back to back, Fender probe
+# writes, GPC 1, 10 us, read RGX+0x20 then RGX+0x18).
+# RESULT: SoC froze. No serial output came back, ping stopped, USB stayed enumerated.
+# Last J96GB line on the iPad screen, confirmed by the user:
+#   J96GB_NEXT write Fender+0x1000 = 0x11 and poll bit 4, then at once read RGX+0x20 and RGX+0x18
+# So both bridge applies, dump A and the first two Fender writes completed, and the hang is again
+# the first RGX read. CONCLUSION: the 33 bridge writes, with ps_gfx forced on (AUTO_ENABLE clear),
+# do not make the RGX CR window answer. Not shown: whether the bridge writes took effect (no
+# read-back), and whether AUTO_ENABLE changes this.
+#
+# gpu-bridge-id-auto was not run (its rewrite had not been re-reviewed).
+
+# ---------------------------------------------------------------------------------------------
+# Second boot, 2026-11-10 ~06:50 GMT, boot 50d4eea6 (fresh j96-boot), module sha256 4a09f867...dd74b9
+#
+# Run 3: gpu-ps-auto-watch (PMGR only). RESULT: completed, result=0.
+# Wrote (0x3ff & ~0x300) | bit 28 = 0x100000ff. Every sample for 3 s reads 0x000003ff:
+#  - bit 28 (AUTO_ENABLE) does NOT read back as set on t7000's ps_gfx (not implemented, or write-only);
+#  - the was-gated flags (9:8) stay set after being written as 0;
+#  - target and actual stay 0xf: the domain does not gate itself.
+[  114.277549] J96GB_PS gfx target 0xf -> reg 0x000003ff
+[  117.637503] J96GB_AUTO +1us ps=000003ff (target f actual f)
+[  117.644029] J96GB_AUTO +139us ps=000003ff (target f actual f)
+[  117.652251] J96GB_AUTO +1115us ps=000003ff (target f actual f)
+[  117.660380] J96GB_AUTO +10921us ps=000003ff (target f actual f)
+[  117.668472] J96GB_AUTO +103985us ps=000003ff (target f actual f)
+[  117.676697] J96GB_AUTO +1023983us ps=000003ff (target f actual f)
+[  117.685023] J96GB_AUTO +3007983us ps=000003ff (target f actual f)
+[  118.337518] J96GB_PS gfx target 0x0 -> reg 0x00000300
+[  118.343431] J96GB_STOP gpu-ps-auto-watch result=0
+#
+# Run 4: gpu-bridge-readback (ps_gfx forced on). RESULT: completed, result=0.
+#  - All 33 bridge registers are readable (first time read).
+#  - Before the writes: bridge 10 +0x18 = 0x00000004, all 32 bridge 11 registers = 0. So after a
+#    ps_gfx power-on the bridges are NOT configured: iBoot's or a previous run's values do not survive.
+#  - After the writes: 33 of 33 read back the written value. The bridge writes take effect.
+#  => In run 2 (gpu-bridge-id) the bridges were configured, and the RGX read still froze.
+[  140.421507] J96GB_RB before b10 +0x18: 00000004
+[  140.427172] J96GB_RB before b11 +0x00: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  140.439369] J96GB_RB before b11 +0x20: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  140.451878] J96GB_RB before b11 +0x40: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  140.464118] J96GB_RB before b11 +0x60: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  140.801567] J96GB_RB after b10 +0x18: 80010004
+[  140.806878] J96GB_RB after b11 +0x00: 007c7c01 007c7c01 007c7c01 007c7901 007c7901 007c7c01 007c7c01 007c7c01
+[  140.819218] J96GB_RB after b11 +0x20: 007c7c01 007c7c01 007c7c01 007c7c01 006c6901 007c7901 007c7c01 007c7c01
+[  140.831509] J96GB_RB after b11 +0x40: 00747201 00747201 00747201 00747201 007c7c01 007c7c01 007c7c01 006c6901
+[  140.843606] J96GB_RB after b11 +0x60: 007c7c01 00797901 00797901 007c7c01 006c6901 00797901 00797901 00797901
+[  140.855816] J96GB_RB 33 of 33 registers read back the written value
+[  141.191411] J96GB_STOP gpu-bridge-readback result=0
+#
+# Run 5: gpu-bridge-id-auto (iOS-exact PMGR order, no pauses: bit 28 write, 33 bridge writes, Fender
+# probe writes, GPC 1, 10 us, read RGX+0x20). RESULT: SoC froze (no serial, no ping, USB enumerated).
+# This token prints nothing between its one announce and the end, so the screen cannot say which
+# access hung; by runs 1-4 every access before the RGX read is proven, so it is the RGX read again.
+#
+# CONCLUSION after runs 1-5: with ps_gfx on, both GFX bridges configured (verified by read-back) and
+# Fender at GPC 1, in iOS's order with or without pauses, the RGX CR window still does not answer.
+# AUTO_ENABLE is not a factor (the bit does not stick). The PMGR device-power path is exhausted
+# except for the untraced first part of 0x66f4a1c. Next suspects are outside it: the GPU clock source
+# (PLL / clock config that Fender's state 1 selects), or state iOS sets up once at PMGR start.

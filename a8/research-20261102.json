@@ -1,0 +1,429 @@
+[
+ {
+  "findings": [
+   {
+    "fact": "The A10 guide is organised by topic, not chronology. kernel.md covers the IOP coprocessor, mailbox, RTKit, GFX firmware, Fender, init data, boot, job ordering and races. power-display.md covers clocks and display, mesa.md the G9P Vulkan driver, performance.md measurement. The notebooks (FENDER, COMPUTE, RENDER, ISA, MESA, DRIVER) are the evidence in the order it was found. Every fact is written as what / evidence / code / verify / A9.",
+    "evidence": "a10/bringup/README.md: 'Every fact uses the same layout: **what** is true, the **evidence** ..., the **code** ..., how to **verify** it on new hardware, and an **A9** line'. Local copy: /tmp/claude-1000/-home-tcballard-Projects/7aa9af37-4e91-48e5-a2e7-64bd8932ea91/scratchpad/gpu/a10method/a10_bringup_README.md",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Milestones in the order they were reached: (1) Fender+0x1000=0x11 powers the core, RGX CORE_ID becomes readable. (2) The GFX firmware is booted by hand over RTKit and its init data is rebuilt crash by crash. (3) Compute: a terminate-only stream (exp 46), a native Metal-compiled shader (66), store_marker writes 0x1357 (68). (4) Ground truth captured on iPadOS. (5) The work becomes an Apple variant of drm/imagination exposing the powervr UAPI: M1 firmware up, M2 in-kernel compute self-test, M3 UAPI compute. (6) Render: TA/3D decoded, first triangle. (7) Mesa fork with the G9P compiler, first Vulkan frame, Zink, Hyprland. (8) Performance: GPU and memory perf states, devfreq, removing per-render shader compiles, then 60 fps.",
+    "evidence": "a10/DRIVER.md Milestones: '1. Firmware up inside powervr ... 2. Kernel-internal compute self-test: experiment 46 ... then 68 ... 3. UAPI compute jobs ... 4. Render ... 5. Mesa fork: pvr + G9P backend, Vulkan, then Zink, EGL/GLES, Hyprland.' a10/REFERENCE.md 'Next, in order': render capture on iOS, kernel driver, G9P shader encoder, Mesa fork.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Time taken: about five calendar days, written with AI assistance (Claude). First look 2026-10-28. Compute shader running 2026-10-29 (experiments up to 69). Kernel milestones 1-3 and the first rendered triangle on 2026-10-30. First Vulkan frame, Zink and Hyprland on screen on 2026-10-31 (~12:00). Hang fixes and live blur at 60 fps on 2026-11-01. Instanced-draw hang fix and the desktop benchmark against pixman on 2026-11-02.",
+    "evidence": "a10/FIRST-LOOK.md title '(2026-10-28 to 2026-10-30)'. DRIVER.md 'Milestone 1 reached on hardware (2026-10-30...)'. RENDER.md '## First rendered triangle (2026-10-30...' and '## The first Vulkan frame (2026-10-31...'. MESA.md '**Hyprland shows on the iPad (2026-10-31 ~12:00)**' and '### Live blur at 60 fps (2026-11-01...'. README.md: 'written with AI assistance (Claude)'. Dates in the notebooks fall only between 2026-10-28 and 2026-11-02.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "A10/RTKit-specific parts: gfx-kf is an AppleA7IOP V2 coprocessor; its mailbox is at IOP+0x4000 and carries one 64-bit word with the endpoint in bits 63:56. RTKit is protocol v12 with endpoints 0, 1, 0x20 (init, 0x81<<48|PA) and 0x21 (doorbell 0x83<<48). The GFX firmware is ARM32 Thumb, taken from AGXFirmwareKextG9PRTBuddy. Fender sits at 0x201d00000: +0x1000 is the power/perf state, +0x2048 bit 0 is the IOP run bit, and it holds the firmware window registers. The rest is Apple too: undocumented init data (X/P/Q/T/U/V), 13 host rings, firmware microsequences, stamps and the event ring, Apple's USC ISA (applegpu_g9p, 16-bit words, 0xc000 padding, 0x8000 end), an Apple DOUT field layout, 8-word CDM records, an older texture-state layout, blending done in the shader, and no transfer engine.",
+    "evidence": "kernel.md 1.1-1.8. REFERENCE.md: 'Apple's GFX firmware runs on an ARM32 A7 IOP and speaks RTKit plus AGX endpoints and rings'. mesa.md 1.9: 'the A10's DOUT field layout differs from Mesa's encoder'. mesa.md 4 table row 12: 'The firmware has no transfer engine'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Generic Rogue parts that carried over: RGX_CR_* registers (CORE_ID 0x011b0602 in the legacy format, MMU_CBASE_MAPPING, fault register RGX+0xe150). The Rogue PC/PD/PT MMU format, so powervr's pvr_mmu page tables are used directly. The PDS ISA (HALT/DOUTD/W/U, END bit 26, CC bit 27). CDM/VDM/PPP control streams (csbgen/rogue, with Apple additions). ISP/TE/PBE registers and the TBDR parameter manager and free list. Reused from the kernel: pvr_drv/pvr_gem/pvr_vm/pvr_mmu/pvr_sync. Not reused: IMG's KCCB/FWCCB firmware protocol for META/MIPS/RISC-V.",
+    "evidence": "REFERENCE.md: 'the fixed-function side is Rogue: Apple's PDS programs use the Rogue encodings of Mesa's pvr_rogue_pds_defs.h ... Page tables are Rogue PC/PD/PT'. The table there says pvr_fw*.c is 'Not Apple's protocol (IMG KCCB/FWCCB, META/MIPS/RISC-V)'. DRIVER.md table: 'Reused as-is (protocol-free) | pvr_drv.c ioctls, pvr_gem.c, pvr_vm.c ..., pvr_mmu.c (Rogue PC/PD/PT)'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Older chips are mentioned only in passing. The kext family has META-only code paths, and the authors guess these serve older chips. The ADT sgx node still has a meta-sw-interrupt property even on the A10. Mesa's pco also targets 6XT (GX6250), and the A10 code is not 6XT-style Rogue either. Mesa's PVR driver lists 6XT/7XE parts.",
+    "evidence": "FIRST-LOOK.md: 'Apple does not run Imagination's META firmware on it'; 'The same kext family also has META-only paths (\"this code should only be run on META GPUs\"), probably for the older chips.' REFERENCE.md: 'Mesa's pco also targets 6XT (GX6250), so this is not a generation difference.'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "About the A9: the guide was written so the work can be repeated on the A9 (S8000/S8003), but nobody has looked at the A9 GPU firmware with this method. Most A9 lines say 'unknown'. The IOP/mailbox generation is 'likely the same' only by analogy with the A9's SmartIO. FENDER.md places an A9 Fender at 0x201e00000 without a source, and the guide says to treat that as unverified. The iOS 10 kext has 'GPC perf state override' variants named G3, G4G, G4P and G5; which one is the A9's is 'not established'. The display driver ADBE was written for the A9's display pipe. The repo README says the A9 (iPad 5) work 'is separate for now'.",
+    "evidence": "bringup/README.md: 'Most A9 lines say \"unknown\": nobody has looked at the A9 GPU firmware with this method yet.' kernel.md 1.5: 'FENDER.md \u00a715.1 places an A9 Fender at 0x201e00000 \"in the same family\", without a source; treat that as unverified.' power-display.md: 'variants of a \"GPC perf state override\" (G3, G4G, G4P, G5; which one is A9's is not established) that wait on bit 4 of + 0x1000'. Top-level README.md: 'The A9 (iPad 5) work is separate for now.'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The guide's ten-item 'how to check on new hardware' list (the A9 alignment checklist): (1) the coprocessor node's iop-version, register windows, mailbox base and four IRQs; (2) the RTKit HELLO version and EPMAP; (3) Fender base, power-state register and the sgx perf-state count, never touching RGX before Fender reports the core powered; (4) init data re-derived from the matching iOS kext and a capture, without copying T8010 offsets; (5) clocks: GPU perf state, PMGR SoC/memory state (setPerfState), CPU, with bandwidth and ALU measured first; (6) job ordering: are the same free-list and fragment-done waits needed; (7) shader ISA: Apple or Rogue, settled with the Metal-toolchain probe; (8) the Mesa bypasses of shared code; (9) display through ADBE; (10) measuring with hypr-bench.sh and the kernel timeline. Further per-section checks include: compile a trivial Metal kernel for the SoC and look for the 0xc000 padding / 0x8000 end; capture a render on iOS and match its PDS words; vary one operand per power of two to map encodings.",
+    "evidence": "bringup/README.md section 'A9 alignment checklist', items 1-10. mesa.md 1.8 Verify: 'compile a trivial Metal kernel with the toolchain for your SoC and check that the output ends in 8000 after c000 padding'. ISA.md Method: 'compile the same kernel with the operand set to each power of two'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The A10 method rested on three external aids. (a) Xcode's downloadable Metal toolchain: metal-tt -arch applegpu_g9p, whose output is byte-identical to what iPadOS loads. The library it ships is named libapplegpuG9G12-nt.dylib, i.e. G9 to G12 only. (b) An iOS-side capture tool (ios-capture) running on iPadOS 17.7 under palera1n rootless. It needs the AGXDeviceUserClient/IOGPUDeviceUserClient/IOSurfaceRootUserClient entitlements. (c) The unstripped iOS 10 T8010 AGX kext from userlandkernel/ios-unstripped-kexts, which supplied register names and init formulas.",
+    "evidence": "COMPUTE.md: 'Xcode's downloadable Metal toolchain ... still ships libapplegpuG9G12-nt.dylib'; 'Access: the boot was palera1n rootless'; 'USC code as loaded matches metal-tt -arch applegpu_g9p byte for byte.' RENDER.md: 'the unstripped iOS 10 T8010 kext from userlandkernel/ios-unstripped-kexts (kexts/10.0/T8010/AGX.kext, 3647 symbols...)'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "userlandkernel/ios-unstripped-kexts has unstripped trees only for 10.0/T8010, 10.3/s8000 and 6.0 (S5L8740X-S5L8950X). Both the T8010 and s8000 trees contain AGXFirmwareKextG3, G4G, G4P, G5G and G5P (no RTBuddy suffix) as well as G9GRTBuddy and G9PRTBuddy. The T8010 tree also has AppleT7000PMGR.kext. s8000 has AGXMetalA9.bundle. There is no T7000 AGX tree.",
+    "evidence": "GitHub API git/trees on userlandkernel/ios-unstripped-kexts: 'kexts/10.0/T8010/AGXFirmwareKextG4P.kext', 'kexts/10.0/T8010/AGXFirmwareKextG9PRTBuddy.kext', 'kexts/10.0/T8010/AppleT7000PMGR.kext', 'kexts/10.3/s8000/AGXMetalA9.bundle'. The kexts/ listing shows only 10.0, 10.3, 6.0.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The J96 iPadOS 15.8.3 kernelcache contains the GPU kexts com.apple.AGXG4P and com.apple.AGXFirmwareKextG4P, the classes AGXMetaFirmware, AGXParameterManagementMeta, AGXFenderCommon and AGXGartG3ThruG5, and AGXMetalA8. Searching for a G4P RTBuddy firmware kext returned nothing. So the A8's AGX generation is G4P, and its GPU firmware is the META type, not an RTBuddy coprocessor.",
+    "evidence": "strings on /home/tcballard/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2: 'com.apple.AGXFirmwareKextG4P', 'com.apple.AGXG4P', counts '13 AGXMetaFirmware', '4 AGXParameterManagementMeta', '1 AGXFenderCommon', '2 AGXGartG3ThruG5', '1 AGXMetalA8'. A grep for AGXFirmwareKextG4P matched only the plain name, with no RTBuddy variant.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The J96 ADT has no gfx-kf (or other GPU IOP) node. The only GPU node is /device-tree/arm-io/sgx with compatible 'gpu,t7000'. Its reg holds two 1 MiB windows at arm-io offsets 0x1000000 and 0x1e00000. With arm-io ranges 0 -> 0x200000000 these are PA 0x201000000 (RGX) and 0x201e00000. It has 5 interrupts, clock-gates 0x7c, a meta-sw-interrupt property, gpu-num-perf-states=4, perf-state-count, a non-zero 128-byte perf-states, and gpu-perf-*/gpu-pwr-* DVFS properties. The only IOP nubs are SEP, ANS and SIO.",
+    "evidence": "ADT parse of j96-adt-20261030.bin (the venv python, values decoded): reg ['0x1000000','0x100000','0x1e00000','0x100000']; arm-io ranges ['0x0','0x200000000',...]; property list includes 'meta-sw-interrupt', 'perf-states'; IOP-like nodes found: '/device-tree/arm-io/sep/iop-sep-nub', '/arm-io/ans/iop-ans-nub', '/arm-io/sio/iop-sio-nub'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The second J96 GPU window at 0x201e00000 is probably Apple's Fender/wrapper block (AGXFenderCommon), at the same address FENDER.md gives, without a source, for the 'A9 Fender'. On T8010 Fender is at 0x201d00000.",
+    "evidence": "FENDER.md \u00a715.1: '(the A9's Fender at 0x201e00000 = +0x100000 is in the same family)'. J96 sgx reg[1] = 0x1e00000 -> 0x201e00000. The kernelcache contains AGXFenderCommon.",
+    "confidence": "INFERRED"
+   },
+   {
+    "fact": "Lessons that apply to any chip: power the core through Fender before any RGX access. Check the GPU and memory perf states early, because both were stuck low and everything ran 2-3x slow with no error. m1n1 fills the GPU OPP table from the ADT sgx perf-states for any A7-A11 GPU node whose table is empty. The Mesa shared-code bypasses (no SPM/load-op programs per render) apply whatever the ISA. Bound every waiting command with timeouts. G9P_SYNC changes timing.",
+    "evidence": "power-display.md: 'On the T8010 the first two were stuck at their lowest setting under Linux, and nothing failed: everything just ran 2-3x slow.' Also: 'm1n1 does this for any GPU node whose table is empty (A7-A11)'. mesa.md 4: 'These are Mesa-side lessons and apply to any Apple GPU on this driver.'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "On the A10, the GPU desktop under Labwc/Firefox was still slower than pixman, which is the J96's current renderer. Labwc used about 3x the CPU and about 240 MB more memory at the low point (from about 1.1 GB free). Scroll p99 was 26 ms against 19 ms for pixman. Hyprland at 60 fps, by contrast, depended on live blur and effects that pixman cannot do.",
+    "evidence": "MESA.md '## The GPU desktop against pixman (2026-11-02)': table row 'Scroll: p95 / p99 ... | 19 / 26 ms, 12 | 18 / 19 ms, 3' and the line '**Still behind pixman:** Labwc's CPU (about 3x) and memory (about 240 MB more at the low point...)'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The open questions also affect new chips: partial renders on parameter-manager out-of-memory (a heavy scene hangs the GPU), depth/stencil (kmscube hangs), MSAA, multiple textures, firmware DVFS and suspend, and more than one GPU context. For the A9 the guide says to answer first whether the shader ISA is Apple's or Rogue's, whether the firmware handles geometry out-of-memory, and whether it blends in the shader.",
+    "evidence": "mesa.md Open questions item 10: 'A9: is the shader ISA Apple's (and which metal-tt target), does its firmware's geometry sequence handle out-of-memory, and does it blend in the shader? Answer these first.' kernel.md Open question 9: 'The A9: firmware image location, endpoint numbers, Fender presence and its power register, the init-page offsets and the ring layout. All unknown.'",
+    "confidence": "READ"
+   }
+  ],
+  "implications_for_a8": "The A10 method carries over to the A8 as a way of working: Fender first, then the firmware boot, init data found crash by crash, compute, render, Mesa, and performance last. Each fact gets evidence, a verify step and an iOS capture, plus the clock checks and the Mesa bypasses. The A10 implementation does not carry over. The J96 GPU is a different generation. The kernelcache has AGXG4P / AGXFirmwareKextG4P / AGXMetaFirmware / AGXParameterManagementMeta and no G4P RTBuddy kext, and the ADT has no gfx-kf node, only arm-io/sgx 'gpu,t7000' with an RGX window at 0x201000000, a second window at 0x201e00000 (probably Fender) and a meta-sw-interrupt property. INFERRED: the A8 GPU runs Apple-built firmware on the Rogue core's own META MCU (6XT-era GX6450-class), not on an RTKit/A7IOP coprocessor. That means all of kernel.md 1.1-1.4 and 2-3 (mailbox, RTKit v12, EP 0x20/0x21, window, X/P/T/U/V init data, rings and microsequences) is A10-only and must be rebuilt from the G4P kext. The firmware probably loads into META through RGX registers (the RGX_CR_META_SP_MSLVCTRL slave port, as in IMG's pvr_fw_meta.c), so upstream drm/imagination's META boot code may be a closer starting point than the A10 Apple variant. The firmware protocol is still Apple's AGX, not IMG's KCCB (INFERRED).\n\nUpside: Mesa pco and the upstream kernel already target 6XT (GX6250). If the A8's USC turns out to be plain Rogue rather than Apple's ISA, the G9P compiler work might not be needed. That is the first thing to settle, using an on-device capture of AGXCompilerService output, since the current Metal toolchain's libapplegpuG9G12 probably cannot target G4P (INFERRED).\n\nResources differ from the A10:\n- No unstripped T7000 AGX kext exists. The unstripped iOS 10 T8010/s8000 trees include AGXFirmwareKextG4P plus AGXMetaFirmware-era code, and AppleT7000PMGR.kext for setPerfState (memory/SoC clocks).\n- J96 tops out at iPadOS 15.8.3, so iOS captures would need palera1n on 15.x (A8 is checkm8-capable; INFERRED it works).\n\nm1n1's OPP table from sgx perf-states and the Fender-style perf-state register may work on the A8, but the J96 node reports gpu-num-perf-states=4 and must be checked. Expect, as on the A10, that a GPU-composited Labwc may not beat pixman on a 2 GB, two-core device without further work.",
+  "open_questions": [
+   "Does the A8 (G4P) GPU firmware run on the Rogue META MCU, and how does AGXFirmwareKextG4P / AGXMetaFirmware load and start it (RGX META slave port, a firmware image inside the G4P kext)? Find the firmware blob and its loader in the J96 kernelcache.",
+   "Is the A8 USC ISA Imagination Rogue (6XT, which Mesa pco targets) or an Apple ISA as on the A10? Settle it by capturing an AGXCompilerService-compiled shader on iPadOS 15.8.3, or with an older Metal toolchain that has a G4P/A8 target. Current Xcode ships only libapplegpuG9G12.",
+   "What is at 0x201e00000 (sgx reg[1]) on T7000: Fender/AGXFenderCommon, and does it have the same +0x1000 power/perf-state register? The iOS 10 'G4P' GPC perf state override variant should say.",
+   "What is the host-firmware protocol between the AGXG4P kext and the META firmware (Apple channels and rings, as AGXTAChannelG4P/AGX3DChannelG4P suggest), and how close is it to the A10 X/P/T init data?",
+   "Can palera1n run ios-capture on iPadOS 15.8.3 on J96 for ground-truth captures?",
+   "Does the unstripped iOS 10 T8010/s8000 AGX.kext contain the G4P code paths (AGXAcceleratorG4P, AGXMetaFirmware) with symbols, making it the T7000 equivalent of the A10's iOS 10 reference?",
+   "What do J96's perf-state-count and gpu-num-perf-states=4 mean together, and does m1n1's dt_set_gpu_pstates handle this node?"
+  ]
+ },
+ {
+  "findings": [
+   {
+    "fact": "The J96 ADT has exactly one GPU node: /device-tree/arm-io/sgx, compatible 'gpu,t7000', device_type 'sgx', AAPL,phandle 0x6a. There is no gfx-kf, no iop-gfx, no gfx-asc and no other graphics coprocessor (IOP/ASC/RTKit) node. The only IOP nodes are sep, ans (iop-nub,rtbuddy) and sio. The only rtbuddy nub is under ans.",
+    "evidence": "Full node walk (157 nodes) with props.py/list.py in /tmp/claude-1000/-home-tcballard-Projects/7aa9af37-4e91-48e5-a2e7-64bd8932ea91/scratchpad/gpu/: '/device-tree/arm-io/sgx | gpu,t7000 | sgx'. IOPs: '/device-tree/arm-io/sep | iop,s5l8960x', '/device-tree/arm-io/ans/iop-ans-nub | iop-nub,rtbuddy', '/device-tree/arm-io/sio | iop,s5l8960x'. A regex search of every property for meta|gfx|gpu|sgx|agx|rgx|firmware|rtkit|rtbuddy|asc found GPU hits only in sgx and in the pmgr 'GFX' device entry.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "sgx has 2 reg ranges in arm-io space, translated through the arm-io ranges (child 0x0 -> parent 0x2_00000000, size 0x1_00000000). reg[0] = PA 0x201000000, size 0x100000 (RGX core, same PA as J71b's RGX). reg[1] = PA 0x201e00000, size 0x100000. INFERRED that reg[1] is Apple's Fender-like wrapper: J71b's sgx also has 2 regs, the second being Fender at 0x201d00000, and the A10 FENDER.md says the 'A9's Fender at 0x201e00000' without a source. On A8 it is the ADT's second sgx reg. No other ADT node maps anything between 0x201000000 and 0x201f00000. pmgr reg[12] 0x201f00000 (+0x1000) and reg[13] 0x201f80000 (+0x1000) sit right after it (purpose unknown).",
+    "evidence": "sgx 'reg u32[8]: 1000000 0 100000 0 1e00000 0 100000 0'. arm-io '#address-cells 2', '#size-cells 2', 'ranges u32[12]: 0 0 0 2 0 1 0 6 0 6 0 2'. regs.py output: '0x201000000 +0x100000 sgx[0]', '0x201e00000 +0x100000 sgx[1]', '0x201f00000 +0x1000 pmgr[12]', '0x201f80000 +0x1000 pmgr[13]'. FENDER.md section 1.1 table: reg index 0 = 0x201000000 RGX, reg index 1 = 0x201d00000 Fender (J71b); FENDER.md line 1054.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The iOS 15.8.3 J96 GPU driver is AGXG4P (bundle com.apple.AGXG4P, IOClass AGXAcceleratorG4P_B0, IONameMatch 'gpu,t7000', MetalPluginName 'AGXMetalA8', source tree AppleEmbeddedGPUDriversGX2G4). It runs the GPU firmware through an AGXMetaFirmware class on the Rogue core's own META processor, not on an Apple RTKit IOP. The firmware payload comes from a separate kext, com.apple.AGXFirmwareKextG4P (_PrelinkExecutableSize 0x1c6b4). AGXG4P still has a 'Fender' concept and maps a Fender reg range. AppleA7IOPV2GFX matches only iop-gfx,s8000/t8010/t8011, and J96 has no such node.",
+    "evidence": "kext_sections.py com.apple.AGXG4P --strings: 'AGXMetaFirmware', 'virtual bool AGXMetaFirmware::waitForMetaIdle()', 'METADEBUG: Timedout waiting for META alive!', 'RGX_CR_META_BOOT 0x%08X', 'RGX_CR_META_SP_MSLVIRQSTATUS 0x%08X', 'AGXMetaFirmware::submitTAChannel/submit3DChannel/submitCLChannel/kickFirmware', 'Could not map Fender reg range', 'fenderPhys != 0 || !startFender', 'Cannot find firmware %s payload kext', '.../AppleEmbeddedGPUDriversGX2G4/Kernel/agxk_accelerator.cpp'. Prelink plist: AGXG4P_B0 IONameMatch 'gpu,t7000', MetalPluginName 'AGXMetalA8'; AppleA7IOPV2-GFX IONameMatch iop-gfx,s8000/t8010/t8011.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The GFX PMGR power state is device id 0x7c, named 'GFX', with no parent. Its ps word 0x03040000 decodes to ps-regs entry 3 (base 0x20300), slot 4, so the register is pmgr+0x20320 = PA 0x20e020320. The existing kernel DT already has ps_gfx at exactly this address. On J71b ps_gfx is pmgr+0x80328, with the same id 0x7c. sgx clock-gates = power-gates = 0x7c (it references this device). GFX also appears in soc-tuner device-set-0 (0x12 0x18 0x1d 0x74 0x7c).",
+    "evidence": "pmgr.py: ' 83 GFX 7c000000 00000000 03040000 00000000 00000000 00000000 00000002 00000b0a'. ps-regs 'u32[18]: 0 20000 0 | 0 20100 ffffffff | 0 20200 7ffebfdf | 0 20300 1f | 0 20400 1 | 0 21000 7'. pmgr reg[0] 0xe000000 size 0x40000 (PA 0x20e000000). Cross-check: SIO_P word 0x011f0000 -> 0x20100+0x1f*8 = 0x201f8, and the DT has 'ps_sio_p: power-controller@201f8'. Linux t7000-pmgr.dtsi:598 'ps_gfx: power-controller@20320 { ... reg = <0x20320 4>; ... label = \"gfx\";' (no power-domains parent). kernel.md step 1: 'PMGR power state (pmgr+0x80328)' for T8010.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "sgx interrupts: interrupt-parent 0x17 (AIC), 5 IRQs: 0x86 0x87 0x88 0x89 0x8a (134-138). No other node uses these numbers (neighbours: ave 0x7b-0x82, jpeg 0x8b, dart-jpeg 0x8c/0x8d, scaler0 0x8f).",
+    "evidence": "sgx 'interrupts u32[5]: 86 87 88 89 8a', 'interrupt-parent u32[1]: 17'. aic AAPL,phandle 0x17. regs.py 'IRQ near GPU' listing.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "meta-sw-interrupt holds 2 tuples of {64-bit PA of AIC SW_SET word, 64-bit PA of AIC SW_CLR word, bitmask}: (0x20e104010, 0x20e104090, 0x40) and (0x20e104010, 0x20e104090, 0x400). In AIC v1, SW_SET is at AIC+0x4000 and SW_CLR at AIC+0x4080, so word 4 covers IRQs 128-159. Bit 6 is IRQ 134 (0x86) and bit 10 is IRQ 138 (0x8a). So the first and last sgx interrupts can be raised in software. INFERRED: they are host<->META-firmware doorbells, and their PAs are what the kext passes as 'AICSWIntRegs' (the same IO-mapping name as in the A10 notes). The kext reads this property ('meta-sw-interrupt' string in AGXG4P).",
+    "evidence": "sgx 'meta-sw-interrupt u32[10]: e104010 2 e104090 2 40 e104010 2 e104090 2 400'. aic 'reg u32[4]: e100000 0 100000 0' (PA 0x20e100000). Linux irq-apple-aic.c: AIC_TARGET_CPU 0x3000, AIC_MAX_IRQ 0x400, and 'irqc->info.sw_set = off' after TARGET_CPU (0x3000+4*0x400 = 0x4000), sw_clr = sw_set + 0x80. AGXG4P strings: 'meta-sw-interrupt', 'AICSWIntRegs', 'AICTimerRegs', 'FenderRegs', 'RGXRegs', 'UVDRegs'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "sgx perf table: perf-state-count 0x10, gpu-num-perf-states 4, perf-states = 16 (frequency Hz, voltage mV) pairs. State 0: 0 Hz / 600 mV. States 1-4: 365 / 450 / 550 / 600 MHz at 896 / 915 / 950 / 950 mV. States 5-8: 182.5 / 225 / 275 / 300 MHz at the same voltages (exactly half of states 1-4; INFERRED a second, half-rate clock table). States 9-15 are zero. There is no perf-states-sram, although the kext looks for it. The values are live, filled by iBoot (the A10 notes say the restore tree has them zeroed).",
+    "evidence": "sgx 'perf-states u32[32]: 0 258 15c17540 380 1ad27480 393 20c85580 3b6 23c34600 3b6 ae0baa0 380 d693a40 393 10642ac0 3b6 11e1a300 3b6 0 ...'. Decoded: 0x15c17540=365000000, 0x1ad27480=450000000, 0x20c85580=550000000, 0x23c34600=600000000, 0xae0baa0=182500000, 0xd693a40=225000000, 0x10642ac0=275000000, 0x11e1a300=300000000. 'perf-state-count u32[1]: 10', 'gpu-num-perf-states u32[1]: 4'. AGXG4P strings 'perf-states', 'perf-states-sram'. FENDER.md: 'perf-states (pairs of frequency in Hz and voltage in mV)'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The other sgx properties are power/DVFS controller tuning (float32 unless noted): gpu-pwr-calc-coeff0/1/2 = 74.49 / 2.064 / 38.43, gpu-pwr-calc-static 66.31, gpu-pwr-integral-gain 0.0202, gpu-pwr-proportional-gain 5.283, gpu-perf-proportional-gain2 6.854, gpu-perf-integral-gain2 0.197, gpu-pwr-perf-scale0..4 = 0 / 1.0 / 1.305 / 1.746 / 1.983. Integers: gpu-device-max-power 0xd14 (3348), gpu-perf-tgt-utilization 0x5f (95), gpu-pwr-filter-time-constant 0x139, gpu-perf-filter-time-constant 5, gpu-perf-filter-time-constant2 0x32, gpu-pwr-min-duty-cycle 0x28, gpu-power-sample-period 0x10, gfx-qos [1 1], opengl-standard 0x300, metal-standard 0x100, procedural-antialiasing (empty flag). sgx has no clock-ids, no iommu-parent and no firmware/version property.",
+    "evidence": "props.py dump of /device-tree/arm-io/sgx, floats decoded with struct.unpack('<f'). For example 0x4294fc36 -> 74.4926, 0x42849d8b -> 66.3077, 0x3ca59586 -> 0.0202.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The GPU has no DART: the ADT has DARTs only for disp0, scaler, jpeg, isp, ave and apcie1, and sgx has no iommu-parent. INFERRED: the GPU uses the Rogue internal MMU (PC/PD/PT), as on A10, where the notes say 'No DART (IOMMU) is involved' and 'Page tables are Rogue PC/PD/PT'.",
+    "evidence": "Node list: dart-disp0, dart-scaler, dart-jpeg, dart-isp, dart-ave, dart-apcie1 only. The sgx property list has no 'iommu-parent'. kernel.md 1.6, REFERENCE.md.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "PMGR has no GPU performance domain. perf-domains lists only SOC and CPU (no MEM, unlike the A10 notes for T8010), and perf-regs = reg 0 + 0x28000. voltage-states0/1 are SoC/CPU tables, not GPU. The carveout-memory-map and memory-map have no GPU firmware region. The carveout region names are empty, and the only graphics carveout is region-id-14 = /vram.",
+    "evidence": "pmgr 'perf-domains' decoded: 'SOC', 'CPU'. 'perf-regs u32[4]: 0 28000 29 0'. carveout 'region-id-14 u32[4]: 7d0de000 8 2400000 0' equals '/device-tree/vram reg u32[4]: 7d0de000 8 2400000 0'. memory-map has only kernel/TrustCache/DeviceTree/SEPFW/preoslog/BootArgs entries.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Display pipeline. disp0: compatible 'adbe0,t7000' (display-subsystem). 5 regs: PA 0x206200000 (+0x100000), 0x206400000, 0x206440000, 0x206480000, 0x2064c0000 (+0x8000 each). IRQs 0x67, 0x6c, 0x6d, 0x6e, 0x6f. clock-gates 0x70 (DISP0-V), 0x76 (DISP-MIE-DPB), 0x74 (DISP-FB-ACTIVE). power-gates 0x70. clock-ids 0x11e 0x11d. iommu-parent 0x5c (mapper-disp0). dot-pitch 0x146 (326). function-frame_swap and function-lcd_enable are present. dart-disp0: 'dart,t7000','dart,s5l8960x', regs 0x206304000 and 0x206300000 (+0x4000 each), IRQs 0x6a 0x6b, page-size 0x1000, bypass-address 0x800 0x800, clock/power-gates 0x24 (DISP0_DART). displayport: 'displayport,t7000', reg 0x206700000 +0x1000, IRQ 0x72, power-gates 0x72 (DP), embedded=1, min_lane_count 4, phy -> lpdp-phy (0x206780000 +0x1000). Child lcd: 'lcd,edp'. There is no 'AppleCLCD' compatible in the ADT (that is an iOS class name). The framebuffer is /vram at PA 0x87d0de000, size 0x2400000 (36 MiB).",
+    "evidence": "props.py dump of disp0, dart-disp0, mapper-disp0, displayport, displayport/lcd, lpdp-phy. lpdp-phy calibration properties were redacted and not printed, and the panel id values are omitted here.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Comparison with J71b (A10) as the OrchardLinux notes describe it. Same on both: node name 'sgx' with 2 reg ranges (RGX at 0x201000000 plus a second wrapper range), pmgr GFX id 0x7c, meta-sw-interrupt and perf-states in sgx, and no GPU DART. Different: J71b has a gfx-kf AppleA7IOPV2 node (0x201d20000, 4 mailbox IRQs 190/189/192/191) running Apple's RTKit v12 GFX firmware. J96 has no gfx-kf, and its firmware runs on the Rogue META core (AGXMetaFirmware). J96's second sgx range is 0x201e00000, not 0x201d00000. J96 ps_gfx is pmgr+0x20320, not pmgr+0x80328. J96 has 5 sgx IRQs, and perf-state-count is 16 with 4 states per table (J71b: 7, state 0 off).",
+    "evidence": "a10/bringup/kernel.md 1.1: 'The GPU's coprocessor is the ADT node gfx-kf ... On T8010 it is at 0x201d20000'; 1.2: 'The ADT lists 190, 189, 192, 191 for gfx-kf'; 1.3: 'protocol v12'. FENDER.md 1.1 table and perf section: 'perf-state-count 7 (state 0 off)'. J96 evidence as in the findings above.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The current kernel build has the upstream Imagination powervr driver source, including META firmware support (pvr_fw_meta.c), but it is disabled in the J96 config. The t7000 DTs have no gpu node.",
+    "evidence": "ls drivers/gpu/drm/imagination shows pvr_fw_meta.c, pvr_fw_mips.c, pvr_fw_riscv.c. linux-j96dev/.config line 2348: '# CONFIG_DRM_POWERVR is not set'. grep for sgx/gpu/imagination in arch/arm64/boot/dts/apple/t7000* finds only ps_gfx.",
+    "confidence": "READ"
+   }
+  ],
+  "implications_for_a8": "The A8 (t7000) GPU uses a different firmware architecture from the A10 path documented in OrchardLinux/gpu, so the A10 boot code (RTKit, A7IOP mailbox, gfx-kf window, the gfx-kf parts of Fender) does not carry over.\n\nWhat the A8 has:\n- No graphics IOP or RTKit. The iOS 15 AGXG4P driver boots Apple's firmware (payload kext AGXFirmwareKextG4P, about 114 KiB) on the PowerVR Rogue core's own META processor through RGX_CR_META_* registers.\n- Host/firmware signalling uses AIC software interrupts 0x86 and 0x8a. Their SW_SET/CLR addresses come from meta-sw-interrupt, and the kext passes them on as AICSWIntRegs. Five AIC IRQs come in total (0x86-0x8a).\n\nWhat does carry over:\n- The RGX register base (0x201000000), the 2-reg sgx layout with a second wrapper window (0x201e00000 on A8, which the kext calls Fender), GFX pmgr id 0x7c, Rogue PC/PD/PT MMU with no DART, and an iBoot-filled perf-states table.\n- A first DT node needs: gpu@201000000 with reg <0x2 0x01000000 0x0 0x100000>, <0x2 0x01e00000 0x0 0x100000>; power-domains = <&ps_gfx> (already in t7000-pmgr.dtsi at pmgr+0x20320); interrupts AIC 134-138.\n- Mainline powervr has a META firmware loader (pvr_fw_meta.c), so it is a closer starting point than the A10 RTKit backend. But Apple's firmware image and its host protocol (AGXMetaFirmware channels: TA, 3D, CL, device control) are Apple's, not IMG's KCCB/FWCCB, so the init-data and ring layouts must be reverse-engineered from AGXG4P (INFERRED).\n\nNext steps in order:\n1. Power ps_gfx on.\n2. Probe the 0x201e00000 window for a Fender-style power-state register (the A10 one is at +0x1000) and find the power-up sequence in AGXG4P (agfPollFenderReg/pollFenderReg strings exist).\n3. Only after the core is powered, read RGX_CR_CORE_ID to get the BVNC (expected GX6450, Series 6XT; not confirmed).\n4. Identify the shader ISA: Rogue versus Apple. The Metal plugin is AGXMetalA8.",
+  "open_questions": [
+   "What is the second sgx window (0x201e00000)? Where is the core power-state register inside it (an analogue of Fender+0x1000), and which values does it take? AGXG4P strings say 'Fender reg range' and 'Will%s use GPC/Fender because you specified %s', but the offsets are not traced yet.",
+   "Which of the 5 sgx IRQs (0x86-0x8a) are hardware RGX/META interrupts to the AP, and which are only software doorbells? meta-sw-interrupt covers 0x86 and 0x8a. What do 0x87-0x89 do?",
+   "How does AGXG4P load the AGXFirmwareKextG4P payload into META: META boot registers, firmware memory window, and whether a Rogue MMU context is used for firmware code. What is the host<->firmware ring/init-data layout?",
+   "What is the GPU core identity (RGX_CR_CORE_ID / BVNC)? Is the shader ISA plain Rogue or Apple's own? This needs hardware access with ps_gfx on.",
+   "What do pmgr reg[12] 0x201f00000 and reg[13] 0x201f80000 do? They sit just after the GPU windows, but no ps-regs entry references them.",
+   "What do the half-rate perf states 5-8 (182.5-300 MHz) mean, and which register sets the GPU clock or voltage per state? PMGR has no GPU perf domain.",
+   "What do the GFX pmgr entry's last words (0x2, 0xb0a) mean? Other devices carry 0x1 plus a small index there."
+  ]
+ },
+ {
+  "findings": [
+   {
+    "fact": "The kernelcache is the legacy prelinked Mach-O /home/tcballard/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2 (42,647,552 bytes). Its __PRELINK_INFO lists 217 kexts. Searching for AGX|IMG|GPU|Graphics|GFX|SGX|RGX finds only two GPU kexts, com.apple.AGXG4P and com.apple.AGXFirmwareKextG4P. Related support kexts are IOAcceleratorFamily2 (v462.7), IOMobileGraphicsFamily and IOSurface. No IMG, SGX or RGX bundle IDs exist.",
+    "evidence": "tools/kext_sections.py <kernel> (full list in /tmp/claude-1000/-home-tcballard-Projects/7aa9af37-4e91-48e5-a2e7-64bd8932ea91/scratchpad/gpu/kextlist.txt): 'com.apple.AGXG4P  load=0xfffffff0057b6440', 'com.apple.AGXFirmwareKextG4P  load=0xfffffff005830b80', 'com.apple.iokit.IOAcceleratorFamily2', 'com.apple.iokit.IOMobileGraphicsFamily  load=0xfffffff00581b3c0'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "com.apple.AGXG4P is the GPU driver. Its sections total about 400,402 bytes; __TEXT_EXEC.__text is 0x4498c (280,972) bytes and __TEXT.__cstring is 0xf3f6. It has one personality, AGXG4P_B0, with IOClass AGXAcceleratorG4P_B0, IONameMatch gpu,t7000 and provider AppleARMIODevice. MetalPluginName is AGXMetalA8, IOGLESBundleName is AGXGLDriver, and CFBundleVersion is 17. Its OSBundleLibraries do not include RTBuddy or AppleA7IOP.",
+    "evidence": "kext_sections.py <kernel> com.apple.AGXG4P --plist: '\"IOClass\": \"AGXAcceleratorG4P_B0\"', '\"IONameMatch\": [\"gpu,t7000\"]', '\"MetalPluginName\": \"AGXMetalA8\"'. OSBundleLibraries: bsd, AppleARMPlatform, unsupported, Libm, AppleMobileFileIntegrity, iokit, IOAcceleratorFamily2, IOReportFamily, IOSurface, mach, private, libkern",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The GPU family name in Apple's code is G4P, revision B0 (HAL 'G4'). The build project is AppleEmbeddedGPUDriversGX2G4. The GART/MMU class names say G3-through-G5, and the MMU is the 'legacy', pre-G5 kind.",
+    "evidence": "AGXG4P cstrings: '/Library/Caches/com.apple.xbs/Sources/AppleEmbeddedGPUDriversGX2G4/Kernel/HAL/G4/agxk_hal_g4p_b0_accelerator.cpp', 'AGXGartG3ThruG5', '.../Kernel/HAL/agxk_legacy_mmu.cpp', '.../HAL/Common/agxk_hal_pre_g5.h', 'virtual void G4P_B0::AGXFenderCommon::setGPCPerformanceState(...)'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "No marketing or BVNC identity string appears anywhere in the kernelcache. Each of these has 0 matches: GX6450, G6450, 6450, G6430, GX6, Rogue, PowerVR, BVNC, rgx.fw, RGXFW and META_CR. Identifying the part as PowerVR GX6450 (Series6XT, 4 clusters) relies on outside knowledge of the A8. The exact BVNC must be read from RGX_CR_CORE_ID at runtime.",
+    "evidence": "grep -aoF <pattern> kernelcache | wc -l -> 0 for each listed pattern; 'AGXG4P' 9, 'G4P_B0' 17, 'gpu,t7000' 1, 'AGXMetalA8' 1",
+    "confidence": "INFERRED"
+   },
+   {
+    "fact": "The GPU firmware runs on the Imagination META core inside the RGX block, not on an RTKit or ARM coprocessor. The driver class is AGXMetaFirmware, in FWController/agxk_fwc_meta.cpp. The host boots and inspects the firmware through the RGX META slave port and RGX_CR_META_BOOT, and register dumps cover two META hardware threads (T0, T1).",
+    "evidence": "AGXG4P cstrings: 'AGXMetaFirmware', '/Library/Caches/com.apple.xbs/Sources/AppleEmbeddedGPUDriversGX2G4/Kernel/FWController/agxk_fwc_meta.cpp', 'virtual bool AGXMetaFirmware::waitForMetaIdle()', 'Timed out waiting for META slave port idle (0x%08X). Subsequent META register reads unreliable!', 'RGX_CR_META_SP_MSLVIRQSTATUS 0x%08X', 'RGX_CR_META_BOOT 0x%08X', 'METADEBUG: Timedout waiting for META alive!', 'Firmware PIO %s', 'bypass_meta_dcache', 'meta-sw-interrupt'; firmware strings 'T0ENABLE: 0x%x' ... 'T1INTERN0: 0x%x'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "There is no RTKit/RTBuddy GFX coprocessor kext for this device. No AGXFirmwareKextG4PRTBuddy or RTBuddyGFX exists. AGXFirmwareKextG4P depends only on the kpi.mach, iokit, libkern and bsd KPIs, and it matches IOResources (not an IOP nub). The kexts that link RTBuddy/AppleA7IOP are AppleSPU, AppleSMC, ASPSupportNodes, AppleSEPManager and AppleT7000SmartIO, and none of them is GPU-related. The ADT has no gfx-asc or GFX IOP node; the GPU node is /device-tree/arm-io/sgx.",
+    "evidence": "grep -aoF counts: 'AGXFirmwareKextG4PRTBuddy' 0, 'RTBuddyGFX' 0, 'gfx-asc' 0. AGXFirmwareKextG4P plist: '\"IOProviderClass\": \"IOResources\"', OSBundleLibraries {kpi.mach, kpi.iokit, kpi.libkern, kpi.bsd}. A Python scan of OSBundleLibraries for RTBuddy/AppleA7IOP lists only SPU/SMC/ASP/SEP/SmartIO. ADT walk: only '/device-tree/arm-io/sgx' matches gpu/sgx/gfx/agx",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The firmware is embedded in AGXFirmwareKextG4P's __TEXT.__const at VM 0xfffffff0058311c8 (file offset 0xcf11c8). It is 0x1c06c = 114,796 bytes, SHA-256 prefix 83f4593cf8fe7edf, with entropy about 7.05 bits/byte. A getter in the kext hands this exact pointer and size to the driver. AGXG4P finds the firmware by kext name, per its 'payload kext' message. The kext itself has 0x184 bytes of code. The firmware build stamp is Oct 15 2023 02:09:45.",
+    "evidence": "Disassembly at 0xfffffff00688a0c0: 'adrp x8, 0xfffffff005831000; add x8, x8, #0x1c8; str x8,[x1]; mov w8,#0xc06c; movk w8,#0x1,lsl #16; str x8,[x2]; mov w0,#1; ret'. scratchpad fwblob.py: 'size 114796 sha256 prefix 83f4593cf8fe7edf'. AGXG4P string 'Cannot find firmware %s payload kext '%s''. Firmware strings 'META FW started! (%s)', 'Oct 15 2023 02:09:45'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The firmware blob is an Imagination META LDR image. It begins with a 16-byte header: devid 0x01aa5500 (bytes 00 55 aa 01), sl_code 0x10, sl_data 0x1190, pl_ctrl 0, crc 0x0caf. A secondary-loader stub follows ('Secondary loader stub 1.0.0.5', META toolkit symbols 'ldlkgbl', '_gbl0'). From 0x1190 runs a clean linked chain of 90 L1 blocks: 70 LOADMEM, 12 ZEROMEM, 2 CONFIG and 5 of cmd 0x10, ending in START_THREADS with next 0xffffffff. Command numbering matches IMG/upstream pvr_rogue_meta.h (LOADMEM 0, ZEROMEM 4, CONFIG 5, START_THREADS 3); reading 0x10 as the comment type is INFERRED. Load targets: 0x10000000-0x1001bef6 (about 101 KB), 0x20000000-0x20001456, 0xc0000000 and 0xe0001ca0-0xe0002006; zero-fills also cover 0x60000000-0x60000400. The firmware was built from two META thread ELFs, g4p_b0_t0.elf and g4p_b0_t1.elf.",
+    "evidence": "scratchpad ldr.py output: 'hdr devid=0x1aa5500 sl_code=0x10 sl_data=0x1190 pl_ctrl=0x0 crc=0xcaf', '0x1bf18 cmd=0x0003(START_THREADS) len=16 next=0xffffffff', '90 blocks {CONFIG: 2, 0x10: 5, ZEROMEM: 12, LOADMEM: 70, START_THREADS: 1}'. Blob string at +0x158c: '.../AGX.build/METAFW_G4P.build/g4p_b0/g4p_b0_t1.elf', at +0x3060 '.../g4p_b0_t0.elf'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The firmware and driver use Rogue RGX register names, including BIF MMU, META, SLC and USC registers. Apple-named AGX_CR_USC_* registers also appear. That suggests the USC (shader core) block is Apple-modified even on G4P, as on A10, but this is not confirmed.",
+    "evidence": "Unique RGX names in AGXG4P: RGX_CR_BIF_FAULT_BANK0/1_MMU_STATUS, RGX_CR_BIF_FAULT_BANK0/1_REQ_STATUS, RGX_CR_BIF_MMU_ENTRY(_STATUS), RGX_CR_BIFPM_STATUS_MMU, RGX_CR_BIF_STATUS_MMU, RGX_CR_CLK_CTRL, RGX_CR_CLK_STATUS, RGX_CR_EVENT_STATUS, RGX_CR_META_BOOT, RGX_CR_META_SP_MSLVIRQSTATUS, RGX_CR_SLC_CTRL_BYPASS, RGX_CR_USC_DM_SLOT0/1, RGX_CR_USC_SERV_*. Also 'AGX_CR_USC_INST_BASE_FRAG', 'AGX_CR_USC_PARTITION_CONFIG'",
+    "confidence": "INFERRED"
+   },
+   {
+    "fact": "The host-to-firmware protocol is Apple's AGF/AGX channel model (TA/3D/CL channels, device-control ring, event/log/trace rings, FW stamps), not IMG's KCCB/FWCCB. The Fender power/GPC block exists on A8, as on A10, here driven by agxk_fender_meta.cpp.",
+    "evidence": "AGXG4P strings: 'virtual void AGXMetaFirmware::submitTAChannel(AGXChannel *const, ...)', 'submit3DChannel', 'submitCLChannel', 'virtual IOReturn AGXMetaFirmware::submitDeviceControl(AGFIAcceleratorRingEntry *, ...)', '============ Firmware event ring ============', 'agxk_fender_meta.cpp', 'AGXk: ... Fender address unknown', 'FenderRegs', 'RGXRegs'; firmware string 'agfPollFenderReg'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The ADT GPU node /device-tree/arm-io/sgx has compatible 'gpu,t7000' and device_type 'sgx'. Its reg holds two ranges: arm-io+0x1000000 (size 0x100000) and arm-io+0x1e00000 (size 0x100000). The first is INFERRED to be RGX and the second Fender, which would be 0x201000000 and 0x201e00000 if arm-io is at 0x200000000. The node also has 5 interrupts (0x86-0x8a), a 40-byte 'meta-sw-interrupt' property, perf-state-count 16, gpu-num-perf-states 4, a 128-byte 'perf-states', and 'metal-standard'/'opengl-standard'.",
+    "evidence": "ADT walk: 'compatible 'gpu,t7000'', 'reg 32 bytes 000000010000000000001000000000000000e001000000000000100000000000', 'interrupts 20 bytes 860000008700000088000000890000008a000000', 'meta-sw-interrupt 40 bytes ...'. AGXG4P reads 'perf-state-count', 'perf-states', 'perf-states-sram', 'interrupts', 'meta-sw-interrupt' from the EDT",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Compared with A10 (OrchardLinux/gpu a10 notes): A10 uses AGXG9P with AGXFirmwareKextG9PRTBuddy and a 0x5b320-byte (373,536) ARM32 Thumb-2 firmware on an A7 IOP speaking RTKit (endpoints 0x20/0x21). A8 instead uses AGXG4P with AGXFirmwareKextG4P (no RTBuddy) and a 114,796-byte META LDR image that the host loads into the GPU's own META core.",
+    "evidence": "a10/FENDER.md \u00a73: 'AGXFirmwareKextG9PRTBuddy::requestFirmwareBinary = 0xfffffff0065e4078 ... size 0x5b320', 'The image is **32-bit ARM**'. a10/REFERENCE.md: 'Apple's GFX firmware runs on an ARM32 A7 IOP and speaks RTKit'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Section sizes of related kexts: AGXFirmwareKextG4P about 117,245 bytes total (114,796 of it firmware); IOAcceleratorFamily2 274,450 (text 191,336); IOMobileGraphicsFamily 374,555 (text 194,108); RTBuddy 252,986 (text 170,352; not used by the GPU). The extracted rootfs under downloads/extract-mt holds no AGX userspace (AGXMetalA8 or AGXGLDriver).",
+    "evidence": "Summed section sizes from kext_sections.py output; find downloads/extract-mt -iname '*agx*' -> no results",
+    "confidence": "READ"
+   }
+  ],
+  "implications_for_a8": "The A10 bring-up path does not carry over to the A8 at the firmware layer. The A10 work uses mainline apple-rtkit with the t8010-a7iop mailbox, ARM32 firmware on a GFX IOP, and RTKit endpoints 0x20/0x21. iPad5,1 has no GFX IOP and no RTBuddy GPU kext. The GPU firmware is an Imagination META LDR image (two META threads, t0/t1) that the host driver must load into the RGX's own META core over the META slave port (RGX_CR_META_SP_MSLV*) and start with RGX_CR_META_BOOT, the way IMG's legacy DDK processes LDR command streams. For that loader, upstream drm/imagination's META code and pvr_rogue_meta.h definitions are much closer references than apple-rtkit (INFERRED: upstream does not take LDR images directly, so a small LDR walker is needed). Above the loader, the command protocol is Apple's AGF channel/ring model (TA/3D/CL channels, device-control ring, event/log rings) with Fender power control. The A10 FENDER/COMPUTE ring work may therefore still be partly relevant, but it must be re-derived for G4P from the AGXG4P kext; IMG KCCB/FWCCB will not work. The MMU is Rogue BIF ('legacy_mmu', pre-G5), which fits the Rogue PC/PD/PT tables the A10 notes describe. The firmware has to be extracted locally from the IPSW at run time (114,796 bytes, sha256 prefix 83f4593cf8fe7edf, at kext __TEXT.__const VM 0xfffffff0058311c8) and never committed. The DT needs an RGX node (arm-io+0x1000000), a second range (likely Fender, arm-io+0x1e00000), 5 IRQs and power/clock gates. Shaders: AGX_CR_USC_* names and the 'AGXMetalA8' plugin suggest Apple may have modified the USC on G4P too, so whether Mesa's pco (Rogue ISA) works or a Metal-toolchain-derived encoder is needed (the A10 approach) is still open. The G9P Mesa backend should not be assumed to apply to the A8.",
+  "open_questions": [
+   "What is the exact BVNC/CORE_ID of the A8 GPU? No identity string is in the kernelcache. It has to come from RGX_CR_CORE_ID/CORE_REVISION after Fender power-up, or from constants in the AGXG4P HAL.",
+   "Is the A8 USC (shader ISA) stock Rogue Series6XT, which Mesa pco might support, or Apple-modified like A10's G9P? Check AGXMetalA8 or metal-tt -arch applegpu_g4p output, if that target exists.",
+   "What do the two ADT reg ranges and the 5 interrupts map to, and is the second range Fender? It would need the AGXG4P reg-index getters disassembled, as FENDER.md did for G9P.",
+   "How does AGXMetaFirmware::bootFirmware walk the LDR stream? Which address-space mapping (0x10000000 / 0x20000000 / 0xe0000000 / 0xc0000000 META addresses) goes to RGX_CR_META_SP_MSLV ports, and what does CONFIG do? This needs disassembly of agxk_fwc_meta.cpp code in AGXG4P.",
+   "How is Fender power-up sequenced on A8 (agxk_fender_meta.cpp) compared with A10's Fender+0x1000=0x11, and which pmgr power/clock gates does the 'sgx' node reference?",
+   "How do the AGF ring and channel structures on G4P differ from the G9P layouts in a10/FENDER.md and COMPUTE.md?",
+   "Is the Apple GPU userspace (AGXMetalA8, AGXGLDriver) worth extracting from the IPSW rootfs (not done yet) to characterize the command stream and shader encoding?"
+  ]
+ },
+ {
+  "findings": [
+   {
+    "fact": "The local 7.3.0-rc1 tree ships drivers/gpu/drm/imagination with all three firmware-processor backends: META, MIPS and RISC-V. Which one is used is chosen from feature bits that come from the firmware image's device-info block, not from DT.",
+    "evidence": "ls drivers/gpu/drm/imagination shows pvr_fw_meta.c, pvr_fw_mips.c, pvr_fw_riscv.c. pvr_fw.c:943-945 lists '[PVR_FW_PROCESSOR_TYPE_META] = &pvr_fw_defs_meta' plus MIPS and RISCV. pvr_device.c:685-692 has 'if (PVR_HAS_FEATURE(pvr_dev, meta)) ... else if (... mips) ... else if (... riscv_fw_processor) ... else return -EINVAL;', called after pvr_fw_validate_init_device_info().",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Only three BVNCs count as supported in the 7.3 kernel: 33.15.11.3 (AXE-1-16M), 36.52.104.182 and 36.53.104.796. Any other core needs the module parameter powervr.exp_hw_support=1. The gpuid parameter can override the BVNC read from hardware.",
+    "evidence": "pvr_device.c:533-536 has 'case PVR_PACKED_BVNC(33, 15, 11, 3): case PVR_PACKED_BVNC(36, 52, 104, 182): case PVR_PACKED_BVNC(36, 53, 104, 796): return PVR_GPU_SUPPORTED;'. Otherwise it logs 'Unknown GPU! Set 'exp_hw_support' to bypass this check.' MODULE_PARM_DESC(gpuid, 'GPU ID (BVNC) to be used instead of the value read from hardware.')",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The kernel reads the BVNC from the 64-bit PBVNC register at 0x20 first. If the branch field is 0 it falls back to the legacy registers: CORE_REVISION (0x20, 32-bit) gives major/minor as b/v, and CORE_ID (0x18) config gives n/c. The two layouts share offset 0x20. Under this decode the A10's legacy CORE_ID 0x011b0602 / CORE_REVISION 0x000d0a00 would come out as 13.10.6.2, which is not a real IMG BVNC.",
+    "evidence": "pvr_device.c:423-438: 'bvnc = pvr_cr_read64(pvr_dev, ROGUE_CR_CORE_ID__PBVNC); ... if (gpu_id->b != 0) ... else { core_rev = ...CORE_REVISION; ... n = FIELD_GET(0xFF00, core_id_config); c = FIELD_GET(0x00FF, ...)'. pvr_rogue_cr_defs.h:336 'ROGUE_CR_CORE_ID__PBVNC 0x0020U', :348 'ROGUE_CR_CORE_ID 0x0018U', :356 'ROGUE_CR_CORE_REVISION 0x0020U', MAJOR_SHIFT 16, MINOR_SHIFT 8. The A10 values come from OrchardLinux/gpu a10/REFERENCE.md: 'CORE_ID = 0x011b0602; legacy CORE_REVISION = 0x000d0a00'. The 13.10.6.2 result is my own arithmetic.",
+    "confidence": "INFERRED"
+   },
+   {
+    "fact": "Firmware is named 'powervr/rogue_<B>.<V>.<N>.<C>_v1.fw'. The kernel accepts only an IMG open-source firmware image. It must be a multiple of 4 KiB and end with a pvr_fw_info_header (info_version 3) in its last 4 KiB. The OPEN_SOURCE flag must be set, the major version must be 1 or higher, and the header BVNC must equal the core's BVNC. All feature, quirk and enhancement data, including meta_coremem_size and phys_bus_width, is read from the device-info block in front of that header.",
+    "evidence": "pvr_device.c:348 'kasprintf(GFP_KERNEL, \"%s_%d.%d.%d.%d_v%d.fw\", base, ...)' with base 'powervr/rogue' and PVR_FW_VERSION_MAJOR 1. pvr_fw.c:97-128: 'fw_offset = firmware->size - SZ_4K', 'if (firmware->size < SZ_4K || (firmware->size % FW_BLOCK_SIZE)) return -EINVAL', 'if (!(header->flags & PVR_FW_FLAGS_OPEN_SOURCE) ...', 'FW built for incorrect GPU ID'. pvr_fw_info.h:70 'PVR_FW_INFO_VERSION 3'. pvr_fw.c:176-187 pvr_fw_get_device_info -> set_quirks/enhancements/features. pvr_device.c:632-638 sets the DMA mask from PVR_FEATURE_VALUE(phys_bus_width).",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Upstream linux-firmware carries only three powervr images: rogue_33.15.11.3_v1.fw, rogue_36.52.104.182_v1.fw and rogue_36.53.104.796_v1.fw (version 1.1.OS@6976702, LICENSE.powervr). Imagination's staging repo adds Series6/6XT images: 4.40.2.51 (GX6250), 4.45.2.58 (GX6250), 4.46.6.62 (GX6650) and 5.9.1.46 (G6110). No image exists for a 4-cluster 6XT core such as GX6450 (no 4.x.4.x).",
+    "evidence": "GitLab API, kernel-firmware/linux-firmware tree powervr: ['rogue_33.15.11.3_v1.fw','rogue_36.52.104.182_v1.fw','rogue_36.53.104.796_v1.fw']. WHENCE:10474-10481 'Driver: powervr ... Version: 1.1.OS@6976702 ... License: Redistributable. See LICENSE.powervr'. gitlab.freedesktop.org/imagination/linux-firmware branch 'powervr' tree powervr/ lists rogue_4.40.2.51_v1.fw, rogue_4.45.2.58_v1.fw, rogue_4.46.6.62_v1.fw, rogue_5.9.1.46_v1.fw, 15.x, 22.x, 36.x.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Mesa main (src/imagination) has device-info tables for Series6/6XT: 4.40.2.51 and 4.45.2.58 (GX6250, 2 clusters), 4.46.6.62 (GX6650, 6 clusters) and 5.9.1.46 (G6110). There is no GX6450 entry. Vulkan is conformant only on 36.52.104.182 and 36.53.104.796. GX6250 4.40.2.51 is listed as 'partially supported' (Series 6XT, Vulkan 1.2). 4.45.2.58 and 4.46.6.62 are 'unsupported and not under active development'. Unlisted cores need PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1. The PowerVR driver is Vulkan-only, so GL needs Zink.",
+    "evidence": "src/imagination/common/pvr_device_info.c:83-96 'CASE_PACKED_BVNC_DEVICE_INFO(4, 40, 2, 51); (4, 45, 2, 58); (4, 46, 6, 62); (5, 9, 1, 46); ...'. device_info/ has g6110.h, gx6250.h, gx6650.h and no gx6450. gx6250.h 'num_clusters = 2U', gx6650.h 'num_clusters = 6U'. vulkan/pvr_physical_device.c:1142-1147 pvr_device_is_conformant lists only 36.52.104.182 and 36.53.104.796, and :1241 'PVR_I_WANT_A_BROKEN_VULKAN_DRIVER'. docs/drivers/powervr.rst:32 'GX6250    Series 6XT  4.40.2.51      1.2' (partially supported), :46-47 lists 4.45.2.58 and 4.46.6.62 as unsupported.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Mesa's src/imagination/README.md declines LLM-generated code contributions, so upstreaming an A8 entry or backend written with an LLM would be refused.",
+    "evidence": "README.md: 'we politely decline LLM-generated code contributions as part of our commitment to continue improving the quality and maintainability of our codebase'. Orchard a10/REFERENCE.md:79 notes the same policy.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "DRM_POWERVR is available in the 7.3 tree but not enabled in the J96 config. Its dependencies are all met by that config: ARM64, DRM=y, MMU, PM=y, and POWER_SEQUENCING unset (allowed by 'POWER_SEQUENCING || !POWER_SEQUENCING'). It selects DRM_EXEC, DRM_GEM_SHMEM_HELPER, DRM_SCHED, DRM_GPUVM and FW_LOADER (FW_LOADER=y already). CPU pages are 4K and VA is 48-bit. The device page size is tied to PAGE_SIZE, and 4K selects ROGUE_MMUCTRL_PAGE_SIZE_4KB. IOMMU_SUPPORT is off, which is fine because Rogue uses its own MMU.",
+    "evidence": "drivers/gpu/drm/imagination/Kconfig: 'depends on (ARM64 || RISCV && 64BIT) / depends on DRM / depends on MMU / depends on PM / depends on POWER_SEQUENCING || !POWER_SEQUENCING'. linux-j96dev/.config: line 2348 '# CONFIG_DRM_POWERVR is not set', 425 'CONFIG_ARM64_4K_PAGES=y', 431 'CONFIG_ARM64_VA_BITS=48', 552 'CONFIG_PM=y', 2254 'CONFIG_DRM=y', 2030 '# CONFIG_POWER_SEQUENCING is not set', 2688 '# CONFIG_IOMMU_SUPPORT is not set', 2765 'CONFIG_APPLE_PMGR_PWRSTATE=y'. pvr_mmu.h:51 '#define PVR_DEVICE_PAGE_SIZE (PAGE_SIZE)', pvr_mmu.c:32-33.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "DT side: the driver matches 'img,img-rogue' and needs a 'core' clock (sys and mem are optional), one IRQ (platform_get_irq index 0), optional resets and power-domains. The binding already names Series6XT as 'img,img-gx6250'. The t7000 DT has a ps_gfx pmgr power-domain that is also a reset provider, but no GPU node yet. The core clock would need a dummy fixed-clock because Apple's pmgr gates are not clocks.",
+    "evidence": "pvr_drv.c:1501 '.compatible = \"img,img-rogue\"'. pvr_device.c:104 'core_clk = devm_clk_get(drm_dev->dev, \"core\")' (required). pvr_power.c:262 devm_reset_control_get_optional_exclusive, :669 dev_pm_domain_attach_list. Documentation/devicetree/bindings/gpu/img,powervr-rogue.yaml:22 '- const: img,img-gx6250'. arch/arm64/boot/dts/apple/t7000-pmgr.dtsi:598-603 'ps_gfx: power-controller@20320 { ... #power-domain-cells = <0>; #reset-cells = <0>; label = \"gfx\";'. The fixed-clock workaround is my inference.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The A8 ADT GPU node is /arm-io/sgx with compatible 'gpu,t7000', 5 interrupts, clock/power gate 0x7c, a 'meta-sw-interrupt' property and perf-states. Searching node paths for asc/rtkit/gfx found no GPU coprocessor (ASC/RTKit) node. Unlike the A10, the A8's GPU firmware runs on the Rogue's internal META core, which is the processor type mainline's pvr_fw_meta.c drives.",
+    "evidence": "ADT parse: '/device-tree/arm-io/sgx' compatible [b'gpu,t7000'], 'interrupts' 5 cells, 'clock-gates': '7c000000', property list includes 'meta-sw-interrupt', 'perf-states', 'gpu-num-perf-states'. Path search for 'asc','rtkit','pmp','meta' printed no paths. Contrast with a10/REFERENCE.md: 'Apple's GFX firmware runs on an ARM32 A7 IOP and speaks RTKit'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Apple's iPadOS 15.8.3 J96 GPU kexts are com.apple.AGXG4P (Apple's own 'AppleEmbeddedGPUDriversGX2G4' driver) and com.apple.AGXFirmwareKextG4P. The firmware blob is the 0x1c06c-byte __TEXT.__const section of the firmware kext. It is a valid IMG META LDR stream in the same container format that mainline process_ldr_command_stream() parses: a 16-byte block header with sl_code 0x10, then 90 L1 blocks (70 LOADMEM, 12 ZEROMEM, 2 CONFIG, 1 START_THREADS, 5 comment) ending with next=0xffffffff. Its strings include 'META FW started! (%s)' and RGX_CR_* register names.",
+    "evidence": "strings: 'com.apple.AGXFirmwareKextG4P', 'com.apple.AGXG4P', '/Library/Caches/com.apple.xbs/Sources/AppleEmbeddedGPUDriversGX2G4/Kernel/agxk_firmware.cpp'. kext_sections.py: '__TEXT.__const: ... size 0x1c06c file 0xcf11c8'. Walking the blob with pvr_rogue_meta.h struct layouts: 'blocks 90 cmds {0x5: 2, 0x10: 5, 0x4: 12, 0x0: 70, 0x3: 1} last_next 0xffffffff'. Mainline pvr_rogue_meta.h:184-189 defines LOADMEM=0, START_THREADS=3, ZEROMEM=4, CONFIG=5. Blob strings: 'META FW started! (%s)', 'RGX_CR_META_SP_MSLVIRQSTATUS: 0x%x'.",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Mainline will reject Apple's A8 firmware as-is. It is not a multiple of 4 KiB and has no pvr_fw_info_header or device-info block. Apple's host-firmware interface is also Apple's own (AGFI ring entries, TA/3D/CL channels), not IMG's RGXFWIF KCCB/FWCCB that pvr_ccb.c, pvr_queue.c and pvr_rogue_fwif*.h implement. Mainline's LDR loader and META start/stop code are a reasonable template, but the FWIF/init-data/queue layer would have to be replaced with an Apple AGX backend, much as Orchard did for A10 with pvr_apple*.c.",
+    "evidence": "Blob size 0x1c06c, 'sz%4096 108'. The first u32 at size-4K is 0xae000, not PVR_FW_INFO_VERSION 3. AGXG4P strings: 'virtual void AGXMetaFirmware::submitTAChannel(AGXChannel *const, ...)', 'submit3DChannel', 'submitCLChannel', 'AGXMetaFirmware::submitDeviceControl(AGFIAcceleratorRingEntry *, ...', 'agxk_fwc_meta.cpp'. Grepping the kext strings for RGXFWIF/kccb returned nothing. Orchard a10/REFERENCE.md:53 says of pvr_fw*.c/pvr_ccb.c/pvr_queue.c/fwif: 'Not Apple's protocol (IMG KCCB/FWCCB, META/MIPS/RISC-V)', and :54 'IMG firmware device-info header | Absent from Apple's image.' That the protocols are incompatible is inferred from these names.",
+    "confidence": "INFERRED"
+   },
+   {
+    "fact": "Running IMG's own open-source firmware on the A8 is blocked. No IMG image exists for a GX6450-class core, and validation requires an exact BVNC match. IMG's 4.40.2.51 / 4.45.2.58 images are built for 2-cluster GX6250. Even with gpuid= forcing a BVNC, the firmware's device info (cluster count, quirks, SLC) would be wrong for a 4-cluster core, and Apple may have modified the core, as it did on the A10.",
+    "evidence": "pvr_fw.c:128 BVNC equality check, plus the imagination/linux-firmware listing (no 4.x.4.x). The A8 being GX6450 with 4 clusters is outside knowledge, not verified here. The A8's actual CORE_ID/CORE_REVISION has not been read; it needs a register read on hardware.",
+    "confidence": "INFERRED"
+   },
+   {
+    "fact": "Pieces that can carry to the A8 6XT core: the kernel register defs (pvr_rogue_cr_defs.h, including META regs and LDR structs), the Rogue MMU page-table code (pvr_mmu.c, 4K), the META LDR loader and META boot/slave-port helpers (pvr_fw_meta.c, pvr_fw_startstop.c), the GEM/VM/sched/UAPI skeleton (pvr_gem, pvr_vm, drm_gpuvm, drm_sched, pvr_drm.h), and in Mesa the gx6250/gx6650 device-info templates, csbgen and PDS. Pieces that cannot carry: IMG firmware files, the FW info/device-info header requirement, the RGXFWIF KCCB/FWCCB protocol and init structures, and the conformance/BVNC gates (bypassable with exp_hw_support and PVR_I_WANT_A_BROKEN_VULKAN_DRIVER). Whether Mesa's pco shader compiler (which targets 6XT GX6250) can carry depends on whether the A8 USC ISA is stock Rogue. On the A10 it is not.",
+    "evidence": "Orchard a10/REFERENCE.md:39 'Mesa's pco also targets 6XT (GX6250), so this is not a generation difference. The A10 pairs Rogue fixed-function hardware with an Apple shader core.' and :68-72 (pco not usable, pdsc/csbgen/winsys reusable). The A8 ISA has not been checked. The split above is a synthesis of the findings in this list.",
+    "confidence": "INFERRED"
+   }
+  ],
+  "implications_for_a8": "The A8 path probably differs from the A10. The A8's GPU firmware runs on the Rogue's own META core (ADT 'meta-sw-interrupt', no GPU ASC/RTKit node, Apple's AGXMetaFirmware class). Apple's firmware is a standard IMG META LDR stream that mainline pvr_fw_meta.c can already parse. So the A8 needs no RTKit or mailbox work: mainline META boot (ROGUE_CR_META_BOOT, slave port, LDR loading into firmware memory) is the right starting point. Three things block it. (1) Apple's firmware lacks IMG's 4K info header and device-info block, so the driver needs a static A8 device-info entry with meta_coremem_size, phys_bus_width, quirks and clusters, plus a firmware-loading path that skips pvr_fw_validate. (2) After boot, the firmware speaks Apple's AGFI ring/channel protocol (TA/3D/CL), not RGXFWIF, so pvr_ccb, pvr_queue and the fwif init structures must be replaced by an Apple G4P backend. Orchard's pvr_apple*.c covers the queue/ring layer conceptually, but its RTKit/IOP layer does not apply. (3) There is no IMG GX6450 firmware to fall back on. Mesa has no GX6450 device info, and GX6250 support is itself only partial. Kernel config is easy: enable CONFIG_DRM_POWERVR=m (all dependencies met, 4K pages fine). The DT node needs 'img,img-rogue', reg/IRQ from the ADT sgx node, power-domains=<&ps_gfx>, resets=<&ps_gfx>, and a dummy fixed 'core' clock. Recommended first experiments: read CORE_ID (0x18), CORE_REVISION (0x20) and the PBVNC 64-bit register at 0x20 with m1n1 after powering ps_gfx, to get the A8's real BVNC. Then check whether A8 shaders (Metal applegpu_g4p output or iPadOS precompiled shaders) parse with Mesa's pco_isa.py. If they do, the A8 could reuse much more of Mesa than the A10 (pco plus pvr Vulkan via the powervr UAPI).",
+  "open_questions": [
+   "What do CORE_ID (0x18), CORE_REVISION (0x20) and PBVNC (0x20, 64-bit) read on the A8 with ps_gfx on? Does mainline's PBVNC-first decode misfire there?",
+   "Is the A8 (G4P) USC shader ISA stock Rogue, parseable by Mesa src/imagination/pco/pco_isa.py, or Apple-modified like the A10 G9P? Need G4P shader binaries (metal-tt -arch applegpu_g4p if Xcode supports it, or iPadOS precompiled shaders).",
+   "What is the A8 core's real meta_coremem_size, phys_bus_width, cluster count and quirk set? These are needed for a static device-info entry because Apple's firmware carries none.",
+   "What are the exact layouts of Apple's G4P host-firmware structures (init data, AGFI ring entries, TA/3D/CL channels)? Does the A8 firmware share Orchard's A10 FENDER.md ring format despite the different coprocessor?",
+   "Which of the 5 ADT sgx interrupts is the main RGX IRQ that mainline's single platform_get_irq(0) would use? What does meta-sw-interrupt (two address-like values) point at?",
+   "Does Apple's firmware expect GPU MMU 16K pages (kext string 'GPU uses 16K page size but CPU does not') or is 4K acceptable? This matters if the firmware itself walks page tables.",
+   "Is the AGXFirmwareKextG4P blob loaded as-is by the kext, or does AGXG4P patch or relocate it (config blocks, boot_conf) before starting META?"
+  ]
+ },
+ {
+  "findings": [
+   {
+    "fact": "Patch 0001 (7.9 KB) changes only three files: it adds a GPU node and an A7IOP mailbox node to t8010.dtsi, enables &gpu in t8010-j71b.dts, and adds an 'apple,t8010-a7iop-mailbox' variant to drivers/soc/apple/mailbox.c. In that variant each message is one 64-bit word with the endpoint in bits 63:56, and IRQ mask and queue enables are re-armed on every start.",
+    "evidence": "tools/a10/kernel/0001-gpu-a7iop-mailbox-and-dt.patch: diff headers for t8010-j71b.dts, t8010.dtsi and drivers/soc/apple/mailbox.c; '+#define APPLE_A7IOP_MBOX_MSG_ENDPOINT GENMASK_ULL(63, 56)'; '+\t{ .compatible = \"apple,t8010-a7iop-mailbox\", .data = &apple_mbox_a7iop_hw },'; 'The A7 IOP block loses this state when its power domain is off, so set it up on every start'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The T8010 GPU node has one compatible ('apple,t8010-gpu') and three reg ranges: rgx 0x201000000+0x100000, fender 0x201d00000+0x5000, iop 0x201d20000+0x4000. It also has mboxes=<&gpu_mbox>, power-domains=<&ps_gfx> and firmware-name 'apple/gfx-t8010.bin'. The mailbox is at 0x201d24000 and uses AIC IRQs 189-192. The orchard version adds operating-points-v2=<&gpu_opp> (an empty table that m1n1 fills) and a 'gpu' alias.",
+    "evidence": "0001 patch: 'reg-names = \"rgx\", \"fender\", \"iop\";', 'firmware-name = \"apple/gfx-t8010.bin\";', 'interrupts = <AIC_IRQ 189 ...'; orchard kernel/patches/devices/t8010/0011-arm64-dts-apple-t8010-Describe-the-GPU.patch: 'operating-points-v2 = <&gpu_opp>;', 'gpu = &gpu;\t/* the bootloader fills its OPP table */'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Patch 0002 (47.7 KB) adds CONFIG_DRM_POWERVR_APPLE (depends on APPLE_RTKIT) and the new files pvr_apple.c/.h and pvr_apple_layout.c/.h. It hooks small changes into pvr_device.c, pvr_device.h, pvr_drv.c and pvr_power.c: a device_data->apple_fw flag, pvr_device_is_apple(), a dt_match entry for apple,t8010-gpu with its own pwr_ops (pvr_power_sequence_ops_apple: init, power_on, power_off), and an optional core clock. It also adds BVNC 13.10.6.2 as EXPERIMENTAL and replaces pvr_device_gpu_init() with pvr_device_gpu_init_apple(). That function uses static device info instead of pvr_request_firmware/IMG header parsing, creates kernel_vm_ctx, then calls pvr_apple_fw_init. The patch also skips pvr_device_irq_init/fini and makes pvr_power_device_idle always return -EBUSY, so runtime PM never powers the GPU down.",
+    "evidence": "0002 patch: '+config DRM_POWERVR_APPLE ... depends on APPLE_RTKIT && (ARCH_APPLE || COMPILE_TEST)'; '+\tcase PVR_PACKED_BVNC(13, 10, 6, 2):\t/* Apple A10 (T8010) */ return PVR_GPU_EXPERIMENTAL;'; '+\tif (pvr_device_is_apple(pvr_dev)) return pvr_device_gpu_init_apple(pvr_dev);'; '/* Apple's RGX interrupt goes to the firmware coprocessor, not to us. */'; '/* Apple firmware power management is not implemented: stay active. */'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "How the A10 firmware boots (pvr_apple_power_init/power_on), which is entirely RTKit/IOP specific:\n- request_firmware('apple/gfx-t8010.bin') is copied into a 1 MiB dmam_alloc_coherent 'window' (must be 16 KiB aligned) at IOP address 0. A 4 MiB 'heap' is allocated next to it, with a DMA mask of 40 bits.\n- The window base, size and IOP address are written twice, into Fender+0x200c (4-byte stride) and IOP+0x0008 (8-byte stride), then IOP+0x38 is set to 1.\n- Fender+0x2048 bit0 (RUN) is set.\n- The kernel calls apple_rtkit_boot and starts endpoints 0x20 (init) and 0x21 (doorbell).\n- It requests Fender power state 0 and then 1 by writing 0x10|state to Fender+0x1000 and polling the low 5 bits. RGX registers may only be touched after state 1.\n- RTKit shmem buffers are carved out of the window after offset 0x8f000.",
+    "evidence": "0002 pvr_apple.c: '#define FENDER_POWER_STATE 0x1000', '#define FENDER_POWER_REQUEST 0x10 /* | target state */', '#define FENDER_WINDOW 0x200c', '#define FENDER_RUN 0x2048', '#define IOP_WINDOW 0x0008', '#define IOP_WINDOW_ENABLE 0x0038', 'err = apple_rtkit_boot(apple->rtk);', 'the AP may only touch RGX registers once Fender reports power state 1'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "How the A10 firmware is initialized (pvr_apple_fw_init plus pvr_apple_layout.c). The host builds Apple G9P firmware structures from scratch: an init page at window+0x98000, memory descriptors at +0x9c000 that map the heap at fw VA 0x100000/0x140000, and main/device/MMU contexts X/P/T/U/Q/V. P holds an I/O table with the Fender PA 0x201d00000 and RGX PA 0x201000000 hard-coded. There are 13 rings, a compute queue and microsequences (StartCompute, WaitIRQ, FinalizeCompute, End). The host sends endpoint 0x20 the message 0x81<<48 | PA of the init page, then polls heap U+0x14 == 1. Jobs are submitted by writing a ring entry and producer index and sending doorbell 0x83<<48 on endpoint 0x21. Completion is a polled stamp; the full orchard version polls it from an hrtimer, apple_poll_us=100.",
+    "evidence": "0002 pvr_apple_layout.c: '#define WIN_INIT 0x98000u', '#define FENDER_PA 0x201d00000ull', '#define RGX_PA 0x201000000ull', 'X  main context (init+0x18)'; pvr_apple.c: 'APPLE_MSG_INIT | (apple->win_dma + init)', '#define HEAP_U_READY (0x5000 + 0x14)'; orchard 0001-drm-imagination-Support-the-Apple-A10-T8010-GPU.patch: 'polled from an hrtimer (apple_poll_us)'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "MMU handling on A10:\n- pvr_mmu/pvr_vm build the GPU page tables as usual.\n- To switch VM, the AP writes ROGUE_CR_MMU_CBASE_MAPPING_CONTEXT=0 and CBASE_MAPPING=root>>12 directly, writes the root into the heap MMU-roots array, and adds 0x400000 to a heap generation word. The firmware then invalidates the TLB, so pvr_mmu_flush_exec goes to pvr_apple_mmu_flush instead of the IMG FWIF flush.\n- Only one VM (GPU context 0) can be active at a time.\n- pvr_vm.c gains an is_userspace_context flag and skips the IMG fw memory-context object on Apple.\n- The layout's PD entries use 16 KiB leaf pages (PD_VALID_16K=0x3). Upstream PVR_DEVICE_PAGE_SIZE is the CPU PAGE_SIZE, and the A10 kernel uses 16K pages.",
+    "evidence": "0002 pvr_apple.c pvr_apple_switch_vm: 'pvr_cr_write32(pvr_dev, ROGUE_CR_MMU_CBASE_MAPPING, (u32)(root >> 12));', '*gen = cpu_to_le32(le32_to_cpu(*gen) + 0x400000);\t/* full invalidation */'; layout: '#define PD_VALID_16K 0x3u /* valid, 16 KiB leaf pages */'; orchard merged patch pvr_mmu.c: '/* Apple's firmware invalidates on a context generation change instead. */'; local pvr_mmu.h:51 '#define PVR_DEVICE_PAGE_SIZE (PAGE_SIZE)'; orchard kernel/configs/apple-16k/README.md: '`CONFIG_ARM64_16K_PAGES=y`: 16 KiB kernel pages.'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Power and clocks on A10:\n- The pmgr only provides the ps_gfx power domain, held through runtime PM (orchard calls pm_runtime_forbid).\n- There is no core clock.\n- The DVFS level is the Fender power state (1..6, FENDER_PERF_STATE_MAX=6), driven by devfreq simple_ondemand on an OPP table whose opp-level is the state number.\n- m1n1 patch 0011 fills that OPP table from the ADT's /arm-io/sgx perf-states for any 'PowerVR-derived GPUs (A7-A11)' (the default: branch of dt_set_gpu), provided the DT has a 'gpu' alias with an empty operating-points-v2 table.",
+    "evidence": "orchard merged patch: '#define FENDER_PERF_STATE_MAX 6', 'DEVFREQ_GOV_SIMPLE_ONDEMAND', 'pm_runtime_forbid(dev);'; orchard boot/m1n1/patches/orchard/0011-kboot-Fill-the-A7-A11-GPU-s-performance-states-from-.patch: 'int sgx = adt_path_offset(adt, \"/arm-io/sgx\");', '-            printf(\"ADT: GPU: unsupported chip!\\n\"); ... +            return dt_set_gpu_pstates(dt);'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "Static device info on A10 replaces IMG firmware header parsing: compute with CDM stream format 1, num_clusters=6, 40-bit physical bus and VA, 32x32 tiles. The full orchard patch (140 KB) also adds geometry and fragment jobs, an Apple stream-extension header type 1 carrying extra firmware registers (pvr_apple_geom_regs/frag_regs, required on Apple), single-parameter-manager scene serialization, recovery on 5 s timeout, and changes to pvr_context/hwrt/free_list/job/queue.",
+    "evidence": "0002: 'pvr_dev->features.num_clusters = 6;', 'phys_bus_width = 40'; orchard merged patch diffstat lists pvr_apple_queue.c, pvr_context.c, pvr_free_list.c, pvr_hwrt.c, pvr_job.c, pvr_queue.c; '#define PVR_STREAM_EXTHDR_TYPE_GEOM_APPLE 1U'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "gpu-iop/apple_gpu_iop.c is the standalone 'gpu-001' experiment that came before 0002. It binds apple,t8010-gpu, loads the firmware into the 1 MiB window, programs the Fender and IOP windows and the RUN bit, boots RTKit, and starts endpoints 0x20/0x21. It exposes debugfs apple_gpu_iop/{mem,send,scratch,crashlog} so messages can be sent and window memory peeked or poked by hand. gpu-fwbuf/gpu_fwbuf.c is a tiny module providing one physically contiguous uncached buffer (default 1 MiB) through debugfs gpu_fwbuf/{data,phys}, so a coprocessor can be pointed at it. Both are bring-up scaffolding, not part of the final driver.",
+    "evidence": "tools/a10/kernel/gpu-iop/apple_gpu_iop.c: 'gpu-001 experiment: boot the T8010 GPU coprocessor (gfx-kf, an AppleA7IOP V2) ... No GPU functionality yet'; 'The coprocessor has no DART.'; tools/a10/kernel/gpu-fwbuf/gpu_fwbuf.c: 'gpu-001 experiment only: one physically contiguous, uncached buffer that userspace fills through debugfs'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The orchard repo has no t7000 GPU or display patches. kernel/patches/devices/t7000 holds only n61 SPI2 and touch DT patches, and t7001 holds UART/PCIe/WiFi/SPI/touch/BT. Patches that are relevant but not for t7000: drivers/drm 0001-0007 (an ADBE KMS driver for the A9 display pipe, 'apple,s8000-display-pipe', plus a t8010 compatible), devices/t8010/0010 (disp0 DT) and 0011 (GPU DT), drivers/gpu/0001 (the full A10 powervr patch), m1n1 0011 (generic sgx perf-states to OPP), and import/cascadia/0017 (an apple-sgx driver for the A5 SGX).",
+    "evidence": "GitHub API git/trees/HEAD?recursive=1 for OrchardLinux/orchard (999 entries, not truncated): 'kernel/patches/devices/t7000/0001-arm64-dts-apple-describe-n61-spi2.patch', '.../t7000/0002-arm64-dts-apple-wire-n61-touch.patch', 'kernel/patches/drivers/drm/0002-drm-adbe-Add-a-KMS-driver-for-the-Apple-A9-display-p.patch', 'kernel/patches/import/cascadia/0017-drm-Add-the-apple-sgx-driver-for-the-A5-PowerVR-SGX5.patch'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The J96 ADT GPU node /arm-io/sgx (compatible gpu,t7000):\n- Two 1 MiB reg ranges at arm-io offsets 0x1000000 and 0x1e00000. arm-io ranges map child 0 to 0x200000000, so these are PA 0x201000000 (the same as the T8010 rgx) and 0x201e00000.\n- Five AIC interrupts, 134-138.\n- A 'meta-sw-interrupt' property whose first words are 0x20e104010 and 0x20e104090 (PMGR address space).\n- perf-state-count=16 and gpu-num-perf-states=4; perf-states is 128 bytes.\n- No iommu-parent, and the ADT has no GPU DART (only disp0/scaler/jpeg/isp/ave/apcie1 DARTs).\n- No gfx IOP/ASC node: the only iop nubs are sep, ans and sio.",
+    "evidence": "~/.local/share/orchard/venv/bin/python -I adt_gpu.py/adt_sgx2.py/adt_dart.py on j96-adt-20261030.bin: 'compatible = gpu,t7000', \"sgx ['0x1000000', '0x100000', '0x1e00000', '0x100000']\", 'sgx irqs (134, 135, 136, 137, 138)', \"meta-sw-int first words ['0x20e104010', '0x20e104090', ...]\", \"['/device-tree/arm-io/sep/iop-sep-nub', '/device-tree/arm-io/ans/iop-ans-nub', '/device-tree/arm-io/sio/iop-sio-nub', ...]\", \"['dart-disp0', 'dart-scaler', 'dart-jpeg', 'dart-isp', 'dart-ave', 'dart-apcie1']\"",
+    "confidence": "READ"
+   },
+   {
+    "fact": "The iPadOS 15.8.3 J96 kernelcache shows that the A8 GPU firmware runs on the Rogue's own META core, not on an RTKit IOP:\n- The GPU kext is AGXG4P (IOClass AGXAcceleratorG4P_B0, IONameMatch gpu,t7000, MetalPluginName AGXMetalA8).\n- The firmware payload is a separate kext, AGXFirmwareKextG4P (executable size 0x1c6b4).\n- Source file names include agxk_fwc_meta.cpp, agxk_fender_meta.cpp, agxk_parameter_management_meta.cpp, agxk_legacy_mmu.cpp and agxk_hal_fw_reg_list_g3_gx2_g4_g5.h, from the 'AppleEmbeddedGPUDriversGX2G4' tree.\n- Log strings include 'META not alive', 'Fender address is unknown', 'GPC/Fender', 'GPU uses 16K page size but CPU does not' and 'Cannot find firmware %s payload kext'.\n- No RTKit strings were checked for or seen in the AGX context.",
+    "evidence": "strings on downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2: '<key>IONameMatch</key><array><string>gpu,t7000</string>', '<string>AGXMetalA8</string>', 'agxk_fwc_meta.cpp', 'AGXk: %s:%d:%s: *** Wait time %llu Nsecs expired, META not alive', '/Library/Caches/com.apple.xbs/Sources/AppleEmbeddedGPUDriversGX2G4/Kernel/HAL/agxk_legacy_mmu.cpp', 'virtual void G4P_B0::AGXFenderCommon::setGPCPerformanceState(AGFPowerPerformanceState)'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "On A8 the second sgx reg range (PA 0x201e00000) is probably the Fender/GPC block. The meta-sw-interrupt PMGR registers (0x20e104010/0x20e104090) are probably the host-to-META kick/doorbell. The 5 sgx AIC interrupts go to the AP, unlike A10, where the RGX IRQ goes to the IOP.",
+    "evidence": "Fender exists on A8 per 'agxk_fender_meta.cpp' and 'Fender State' strings; T8010 fender is at 0x201d00000 (0002: '#define FENDER_PA 0x201d00000ull'); ADT layout above. Not verified against the AGXG4P disassembly.",
+    "confidence": "INFERRED"
+   },
+   {
+    "fact": "The local J96 build has none of the GPU/display prerequisites:\n- It uses 4 KiB pages (CONFIG_ARM64_4K_PAGES=y). Orchard says A7/A8/A8X have no 16 KiB granule.\n- CONFIG_DRM_POWERVR is not set, CONFIG_APPLE_MAILBOX is not set and CONFIG_DRM_ADP is not set; CONFIG_APPLE_PMGR_PWRSTATE=y.\n- Upstream drm/imagination in the tree already contains pvr_fw_meta.c and supports the META, MIPS and RISC-V processor types, but only for IMG firmware.\n- t7000-pmgr.dtsi already defines ps_gfx (reg 0x20320, label gfx), ps_disp0 (0x202b0) and ps_dp (0x202c0).\n- The t7000 DTs have no gpu or disp0 node.\n- The tree's drivers/gpu/drm/adp matches 'apple,h7-display-pipe'. The J96 kernelcache's display kext is AppleH7ADBE0 (with adbe0,t7000), and the A9 ADBE patch says its FIFO/layer registers 'sit at the same offsets as in the H7 pipe driven by drivers/gpu/drm/adp'.",
+    "evidence": "/home/tcballard/Projects/iomarchy-j96-tNPWSDe4/build/linux-j96dev/.config: 'CONFIG_ARM64_4K_PAGES=y', '# CONFIG_DRM_POWERVR is not set', '# CONFIG_APPLE_MAILBOX is not set', '# CONFIG_DRM_ADP is not set'; orchard kernel/configs/apple-4k/README.md: 'Apple's A7 (S5L8960X), A8 (T7000) and A8X (T7001) CPUs have no 16 KiB translation granule'; local pvr_fw.c:943 '[PVR_FW_PROCESSOR_TYPE_META] = &pvr_fw_defs_meta,'; t7000-pmgr.dtsi:598 'ps_gfx: power-controller@20320'; adp_drv.c:595 '{ .compatible = \"apple,h7-display-pipe\", }'; kernelcache strings '<string>AppleH7ADBE0</string>', '<string>adbe0,t7000</string>'",
+    "confidence": "READ"
+   },
+   {
+    "fact": "In the J96 ADT, disp0 (adbe0,t7000) is at PA 0x206200000 (first range 0x100000, plus three 0x8000 ranges at 0x206400000/0x206440000/0x206480000) with IRQs 103 and 108-111. dart-disp0 is at 0x206304000 and 0x206300000 (0x4000 each), the same DART addresses the T8010 disp0 DT patch uses. The T8010 node uses adp 0x206200000+0x9000 and six IRQs (154, 158-161, 155).",
+    "evidence": "adt decode: \"disp0 ['0x6200000', '0x100000', '0x6400000', '0x8000', '0x6440000', '0x8000', '0x6480000', '0x8000']\", 'disp0 irqs (103, 108, 109, 110, 111)', \"dart-disp0 ['0x6304000', '0x4000', '0x6300000', '0x4000']\"; orchard devices/t8010/0010: 'reg = <0x2 0x06200000 0x0 0x9000>, <0x2 0x06304000 0x0 0x4000>, <0x2 0x06300000 0x0 0x4000>;'",
+    "confidence": "READ"
+   }
+  ],
+  "implications_for_a8": "The A10 kernel work splits into two layers, and only one of them carries over to t7000.\n\n**Reusable on A8, in principle:**\n- The way it attaches to upstream drm/imagination: a device_data flag, pvr_device_is_apple(), its own pwr_ops, a dt_match entry, an experimental BVNC, static device info, skipped IMG firmware header parsing, an optional core clock, and kept powervr GEM/VM/MMU/UAPI.\n- Rogue page tables built by pvr_mmu and programmed through ROGUE_CR_MMU_CBASE_MAPPING.\n- The Apple stream-extension mechanism for extra firmware registers.\n- The Fender power-state/perf-state idea, plus devfreq on an OPP table that m1n1 0011 fills generically from /arm-io/sgx perf-states. The J96 ADT has perf-state-count=16 and gpu-num-perf-states=4. This only works if our m1n1 carries that orchard patch and the DT has a 'gpu' alias with an empty OPP table.\n- The ps_gfx power domain, which already exists in t7000-pmgr.dtsi.\n\n**Specific to T8010 and its RTKit coprocessor; must be replaced:**\n- Patch 0001 entirely (A7IOP mailbox, iop reg range, mbox node).\n- Everything that uses APPLE_RTKIT: apple_rtkit_boot, endpoints 0x20/0x21, the 0x81 init message and 0x83 doorbell, shmem carved from the IOP window.\n- The 1 MiB window programmed at Fender+0x200c and IOP+0x8, and the RUN bit at Fender+0x2048.\n- The whole pvr_apple_layout.c init page and contexts (X/P/T/U/Q/V, 13 rings, microsequence opcodes, heap offsets), which belong to the G9P firmware ABI.\n- The hard-coded Fender/RGX PAs and Fender register offsets.\n- The 16 KiB GPU page assumption (PD_VALID_16K, 16 KiB alignment).\n- Skipping the AP-side RGX IRQ.\n- The A10 static info: 6 clusters, BVNC 13.10.6.2.\n\n**Why A8 is different:** the kernelcache and ADT confirm A8 has no GPU IOP. Firmware is a payload kext (AGXFirmwareKextG4P) that runs on the Rogue's own META core (agxk_fwc_meta.cpp, 'META not alive'), and there is still a Fender/GPC block (agxk_fender_meta.cpp).\n\n**What an A8 variant needs instead:**\n1. A META boot path. Upstream pvr_fw_meta.c / pvr_fw_startstop.c are the natural starting point for register sequences: META slave port, bootloader config, coremem. But the firmware is Apple's G4P image with Apple's own init ABI, not IMG FWIF. The boot and init structures must come from reverse-engineering AGXG4P (agxk_fwc_meta.cpp, agxk_firmware.cpp, agxk_legacy_mmu.cpp), and the image must be extracted from the AGXFirmwareKextG4P payload, kept out of any repo.\n2. A Fender/GPC driver at the probable 0x201e00000 range (INFERRED). Its power-state register layout must be checked against agxk_fender_common.cpp rather than assumed equal to T8010's 0x1000/0x10|state.\n3. A host-to-firmware kick via the meta-sw-interrupt PMGR registers (INFERRED), and a real AP IRQ handler on the 5 sgx AIC lines (134-138) instead of polling.\n4. 4 KiB GPU pages to match the 4K kernel (PVR_DEVICE_PAGE_SIZE=PAGE_SIZE). Apple's 'GPU uses 16K page size but CPU does not' check suggests the GPU page size is configurable.\n5. Its own BVNC/CORE_ID and static feature info (cluster count etc.), read from RGX CORE_ID on hardware.\n6. DT: a 'apple,t7000-gpu' node with rgx and fender ranges, interrupts, power-domains=<&ps_gfx> and an OPP table; no mbox.\n7. Kconfig: DRM_POWERVR, plus an A8 variant option that does not depend on APPLE_RTKIT.\n\n**Display:** no t7000 ADBE patch exists. The A9 ADBE KMS driver (orchard drm 0002) and mainline drm/adp ('apple,h7-display-pipe') are the candidates, since the A8 kext is AppleH7ADBE0. The DART addresses match T8010, so a t7000 disp0 node with a t7000 compatible and the J96 ADT regs/IRQs, followed by validating the ADP register offsets, is the cheapest next display step. It does not depend on the GPU.",
+  "open_questions": [
+   "Is the A8 sgx second reg range (PA 0x201e00000, 1 MiB) the Fender/GPC block, and does its power-state register match T8010's Fender+0x1000 (write 0x10|state, poll low 5 bits)? This needs the AGXG4P disassembly of agxk_fender_common.cpp/agxk_fender_meta.cpp.",
+   "How does AGXG4P boot META: through the RGX META slave port the way upstream pvr_fw_meta.c does, or another way? What is the G4P firmware's init structure and host-to-firmware kick? Are the meta-sw-interrupt PMGR words (0x20e104010, 0x20e104090, ...) the doorbell?",
+   "Where exactly is the META firmware image inside AGXFirmwareKextG4P ('Cannot find firmware %s payload kext'), and what format is it in?",
+   "What do the A8 RGX CORE_ID/BVNC and cluster count read on hardware? GX6450 is expected but unverified, and the upstream powervr feature tables may not cover it.",
+   "Which of the five sgx AIC interrupts (134-138) is the RGX/META host interrupt, and what are the others?",
+   "Does the J96 m1n1 build include orchard m1n1 patch 0011 (sgx perf-states to OPP table)? Without it the OPP table stays empty.",
+   "The ADT sgx power-gates/clock-gates value (0x7c) does not obviously correspond to ps_gfx reg 0x20320 in t7000-pmgr.dtsi. Is the existing ps_gfx node the correct domain for the GPU?",
+   "Does the A8 GPU's shader ISA match the A10 'applegpu_g9p' ISA that the Mesa fork targets? This is a Mesa-side question, outside this kernel investigation.",
+   "Are the ADP FIFO/layer register offsets of the A8 AppleH7ADBE0 pipe compatible with the orchard A9 ADBE driver or with mainline drm/adp?"
+  ]
+ }
+]

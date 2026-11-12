@@ -1,0 +1,77 @@
+# J96 GPU: GPC 1 power-state dump, 2026-11-09 ~21:05 GMT, boot 9484673f (fresh j96-boot)
+# Kernel 7.3.0-rc1-j96-firstboot+ (the dev-image/artifacts build; config hash matches artifacts/kernel.config).
+# Module gpu/probe/apple-j96-gpudump.ko sha256 e83a8079...c5f0a4, loaded after unbinding the built-in
+# apple-j96-gpuprobe. No RGX access. Desktop stopped, tty1 console in front. Slow token first, then the
+# timed token, same boot. Both finished (result=0); the iPad stayed up.
+#
+# Findings:
+# - All seven Fender registers are readable while ps_gfx is on, at GPC 0 and at GPC 1 (first time read).
+# - Powered, before any write (dump A, both runs): every Fender register reads 0. The second run's dump A
+#   is all-zero again, so Fender state does not survive a ps_gfx off/on cycle.
+# - At GPC 1 nothing changes from +0 us to +1 s (dumps B-F identical): sleep=0x40000000 (as written),
+#   perf=0x1, intst=0x2 (one unacked Fender interrupt bit raised by the 0->1 transition), kick=0, next=0,
+#   ovr=0, ps_gfx=0x3ff (target 0xf, actual 0xf, was-gated flags set).
+# - After GPC 0 (dump G): perf=0, intst=0x3 (bit 0 added by the 1->0 transition), sleep still 0x40000000.
+# - So at the moment stage 4 read RGX+0x20 and froze, Fender and ps_gfx already show their final state,
+#   and waiting up to 1 s changes nothing they report. A longer delay alone is unlikely to fix the RGX read;
+#   whatever keeps the RGX CR window from answering is not visible in these eight registers.
+#
+[  689.688993] apple_j96_gpudump: loading out-of-tree module taints kernel.
+[  689.693748] J96GD_READY ps_gfx=0x00000300; dump available (see 'attempt')
+[  689.733266] J96GD_TEST kernel console line - if you can read this, the screen is ready
+[  778.695974] J96GD_BEGIN gpu-gpc1-dump-slow (no RGX access)
+[  778.702241] J96GD_NEXT pmgr ps_gfx set target 0xf and poll
+[  779.045519] J96GD_PS gfx target 0xf -> reg 0x000003ff
+[  779.051303] J96GD_NEXT read Fender+0x1000 (perf)
+[  779.365475] J96GD_FENDER powered perf=00000000
+[  779.370664] J96GD_NEXT dump A: read Fender+0x0 (sleep)
+[  779.685482] J96GD_NEXT dump A: read Fender+0x8 (kick)
+[  780.001481] J96GD_NEXT dump A: read Fender+0x10 (inten)
+[  780.325478] J96GD_NEXT dump A: read Fender+0x14 (intst)
+[  780.645492] J96GD_NEXT dump A: read Fender+0x1000 (perf)
+[  780.965507] J96GD_NEXT dump A: read Fender+0x1004 (next)
+[  781.281480] J96GD_NEXT dump A: read Fender+0x20000 (ovr)
+[  781.605491] J96GD_DUMP A-powered - ps=000003ff sleep=00000000 kick=00000000 inten=00000000 intst=00000000 perf=00000000 next=00000000 ovr=00000000
+[  781.619483] J96GD_NEXT write Fender+0x10000 = 0xffff0000
+[  781.953486] J96GD_NEXT write Fender+0x0 = 0x40000000
+[  782.273478] J96GD_NEXT write Fender+0x1000 = 0x11 and poll bit 4, then read each register, announced
+[  782.597765] J96GD_NEXT dump B: read Fender+0x0 (sleep)
+[  782.917483] J96GD_NEXT dump B: read Fender+0x8 (kick)
+[  783.237477] J96GD_NEXT dump B: read Fender+0x10 (inten)
+[  783.557477] J96GD_NEXT dump B: read Fender+0x14 (intst)
+[  783.877473] J96GD_NEXT dump B: read Fender+0x1000 (perf)
+[  784.197475] J96GD_NEXT dump B: read Fender+0x1004 (next)
+[  784.513478] J96GD_NEXT dump B: read Fender+0x20000 (ovr)
+[  784.833496] J96GD_DUMP B-gpc1 - ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000002 perf=00000001 next=00000000 ovr=00000000
+[  784.847230] J96GD_DUMP F-gpc1 +2249463us ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000002 perf=00000001 next=00000000 ovr=00000000
+[  784.863301] J96GD_NEXT read Fender+0x1000, then write 0x10 and poll bit 4
+[  785.189545] J96GD_DUMP G-gpc0 - ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000003 perf=00000000 next=00000000 ovr=00000000
+[  785.203222] J96GD_NEXT pmgr ps_gfx set target 0x0 and poll
+[  785.541479] J96GD_PS gfx target 0x0 -> reg 0x00000300
+[  785.547286] J96GD_STOP gpu-gpc1-dump-slow result=0
+[  794.296225] J96GD_BEGIN gpu-gpc1-dump (no RGX access)
+[  794.302149] J96GD_NEXT pmgr ps_gfx set target 0xf and poll
+[  794.629515] J96GD_PS gfx target 0xf -> reg 0x000003ff
+[  794.635284] J96GD_NEXT read Fender+0x1000 (perf)
+[  794.945492] J96GD_FENDER powered perf=00000000
+[  794.950802] J96GD_NEXT dump A: read Fender+0x0 (sleep)
+[  795.269476] J96GD_NEXT dump A: read Fender+0x8 (kick)
+[  795.585490] J96GD_NEXT dump A: read Fender+0x10 (inten)
+[  795.909479] J96GD_NEXT dump A: read Fender+0x14 (intst)
+[  796.229482] J96GD_NEXT dump A: read Fender+0x1000 (perf)
+[  796.549470] J96GD_NEXT dump A: read Fender+0x1004 (next)
+[  796.869477] J96GD_NEXT dump A: read Fender+0x20000 (ovr)
+[  797.189477] J96GD_DUMP A-powered - ps=000003ff sleep=00000000 kick=00000000 inten=00000000 intst=00000000 perf=00000000 next=00000000 ovr=00000000
+[  797.203461] J96GD_NEXT write Fender+0x10000 = 0xffff0000
+[  797.541476] J96GD_NEXT write Fender+0x0 = 0x40000000
+[  797.861478] J96GD_NEXT write Fender+0x1000 = 0x11 and poll bit 4, then read dumps B, C, D with nothing printed (a hang here is one of those reads)
+[  798.192435] J96GD_DUMP B-gpc1 +0us ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000002 perf=00000001 next=00000000 ovr=00000000
+[  798.206509] J96GD_DUMP C-gpc1 +1136us ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000002 perf=00000001 next=00000000 ovr=00000000
+[  798.224097] J96GD_DUMP D-gpc1 +10668us ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000002 perf=00000001 next=00000000 ovr=00000000
+[  798.285456] J96GD_DUMP E-gpc1 +103691us ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000002 perf=00000001 next=00000000 ovr=00000000
+[  799.201506] J96GD_DUMP F-gpc1 +1019731us ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000002 perf=00000001 next=00000000 ovr=00000000
+[  799.215981] J96GD_NEXT read Fender+0x1000, then write 0x10 and poll bit 4
+[  799.553559] J96GD_DUMP G-gpc0 - ps=000003ff sleep=40000000 kick=00000000 inten=00000000 intst=00000003 perf=00000000 next=00000000 ovr=00000000
+[  799.567256] J96GD_NEXT pmgr ps_gfx set target 0x0 and poll
+[  799.909489] J96GD_PS gfx target 0x0 -> reg 0x00000300
+[  799.915304] J96GD_STOP gpu-gpc1-dump result=0
