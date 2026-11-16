@@ -3,13 +3,17 @@
 // Step 1 of the J96 register capture (gpu/M1-BRIDGE-FINDINGS.md): READ-ONLY. It never writes
 // kernel memory and never calls into the kernel beyond the Mach calls below.
 //
+//   kprobe regions         list kernel map regions from the unslid base (map queries only, no reads)
 //   kprobe                 report whether a kernel task port is obtainable, and the slide
 //   kprobe read ADDR LEN   hex-dump LEN bytes (max 4096) of kernel virtual memory at ADDR
 //
 // Ways tried for the kernel task port, in order: task_for_pid(0), host special port 4
 // (the classic "hsp4" a jailbreak may publish). Neither is expected on stock iPadOS.
-// A wrong ADDR makes the read fail with an error; it does not panic. Reading a device
-// (MMIO) mapping through this path is NOT known to be safe: do not point it at one.
+// WARNING: on palera1n (15.8.3, J96) a read of an UNMAPPED kernel address through this port
+// PANICS the kernel (data abort, far = the address; panic-full-2026-11-09-230600 and again on
+// 16 Nov). So every read is first checked with mach_vm_region (a map query that touches no
+// target memory) and is done only inside one region the kernel reports as readable. Reading a
+// device (MMIO) mapping is NOT known to be safe either: do not point it at one.
 #include <errno.h>
 #include <mach/mach.h>
 #include <stdint.h>
@@ -45,7 +49,26 @@ static mach_port_t kernel_task_port(const char **how) {
     return MACH_PORT_NULL;
 }
 
+// Is [addr, addr+len) inside one mapped region with read permission? Map query only.
+static int readable(mach_port_t kt, uint64_t addr, size_t len) {
+    mach_vm_address_t a = addr;
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t obj = MACH_PORT_NULL;
+    kern_return_t kr = mach_vm_region(kt, &a, &size, VM_REGION_BASIC_INFO_64,
+                                      (vm_region_info_t)&info, &count, &obj);
+    if (kr != KERN_SUCCESS)
+        return 0;
+    return a <= addr && addr + len <= a + size && (info.protection & VM_PROT_READ);
+}
+
 static int kread(mach_port_t kt, uint64_t addr, void *buf, size_t len) {
+    if (!readable(kt, addr, len)) {
+        printf("kread 0x%llx len %zu: refused, not inside one readable kernel region\n",
+               (unsigned long long)addr, len);
+        return -1;
+    }
     mach_vm_size_t got = 0;
     kern_return_t kr = mach_vm_read_overwrite(kt, addr, len, (mach_vm_address_t)buf, &got);
     if (kr != KERN_SUCCESS || got != len) {
@@ -57,20 +80,49 @@ static int kread(mach_port_t kt, uint64_t addr, void *buf, size_t len) {
 }
 
 // The kernel's Mach-O header sits at KERNEL_UNSLID_BASE + slide; the slide is a multiple of 2 MiB.
-static int find_slide(mach_port_t kt, uint64_t *slide) {
-    for (uint64_t s = 0; s < 0x40000000ULL; s += 0x200000) {
-        uint32_t magic = 0;
-        mach_vm_size_t got = 0;
-        if (mach_vm_read_overwrite(kt, KERNEL_UNSLID_BASE + s, 4, (mach_vm_address_t)&magic, &got) ==
-                KERN_SUCCESS && got == 4 && magic == 0xfeedfacf) {
-            *slide = s;
-            return 0;
+// Walk the kernel map with mach_vm_region (it returns the next mapped region at or above the
+// address) and read only 2 MiB-aligned candidates inside readable regions.
+static int find_slide(mach_port_t kt, uint64_t *slide, int list_only) {
+    mach_vm_address_t a = KERNEL_UNSLID_BASE;
+    const uint64_t end = KERNEL_UNSLID_BASE + 0x40000000ULL;
+    for (int n = 0; n < 4096 && a < end; n++) {
+        mach_vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t obj = MACH_PORT_NULL;
+        kern_return_t kr = mach_vm_region(kt, &a, &size, VM_REGION_BASIC_INFO_64,
+                                          (vm_region_info_t)&info, &count, &obj);
+        if (kr != KERN_SUCCESS) {
+            printf("mach_vm_region at 0x%llx: kr=0x%x (%s)\n", (unsigned long long)a, kr,
+                   mach_error_string(kr));
+            return -1;
         }
+        if ((list_only && n < 64) || n < 8)
+            printf("region 0x%llx size 0x%llx prot %d\n", (unsigned long long)a,
+                   (unsigned long long)size, info.protection);
+        if (a >= end)
+            break;
+        // Only a region START that is a possible kernel base (unslid base + n * 2 MiB): the
+        // header is the first page of its mapping, and a page inside a readable region can
+        // still be unbacked.
+        if (!list_only && (info.protection & VM_PROT_READ) && a >= KERNEL_UNSLID_BASE &&
+            !((a - KERNEL_UNSLID_BASE) & 0x1fffff)) {
+            uint32_t magic = 0;
+            mach_vm_size_t got = 0;
+            printf("candidate 0x%llx: reading 4 bytes\n", (unsigned long long)a);
+            if (mach_vm_read_overwrite(kt, a, 4, (mach_vm_address_t)&magic, &got) ==
+                    KERN_SUCCESS && got == 4 && magic == 0xfeedfacf) {
+                *slide = a - KERNEL_UNSLID_BASE;
+                return 0;
+            }
+        }
+        a += size;
     }
     return -1;
 }
 
 int main(int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);  // every line reaches the host before a possible panic
     printf("kprobe: uid=%d euid=%d\n", getuid(), geteuid());
     const char *how = "none";
     mach_port_t kt = kernel_task_port(&how);
@@ -79,6 +131,11 @@ int main(int argc, char **argv) {
         return 2;
     }
     printf("kernel task port via %s\n", how);
+    struct task_dyld_info dyld = {0};
+    mach_msg_type_number_t dcount = TASK_DYLD_INFO_COUNT;
+    kern_return_t dkr = task_info(kt, TASK_DYLD_INFO, (task_info_t)&dyld, &dcount);
+    printf("TASK_DYLD_INFO: kr=0x%x addr=0x%llx size=0x%llx\n", dkr,
+           (unsigned long long)dyld.all_image_info_addr, (unsigned long long)dyld.all_image_info_size);
     if (argc == 4 && !strcmp(argv[1], "read")) {
         uint64_t addr = strtoull(argv[2], NULL, 0);
         size_t len = strtoul(argv[3], NULL, 0);
@@ -98,7 +155,12 @@ int main(int argc, char **argv) {
         return 0;
     }
     uint64_t slide = 0;
-    if (find_slide(kt, &slide)) {
+    if (argc == 2 && !strcmp(argv[1], "regions")) {
+        find_slide(kt, &slide, 1);  // list the kernel map from the unslid base; no reads
+        printf("RESULT: regions listed (no kernel memory read).\n");
+        return 0;
+    }
+    if (find_slide(kt, &slide, 0)) {
         printf("RESULT: have a port, but could not read the kernel header at any slide.\n");
         return 3;
     }
