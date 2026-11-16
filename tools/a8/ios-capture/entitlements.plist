@@ -19,5 +19,15 @@
         <string>IOAccelDevice</string>
         <string>IOAccelDevice2</string>
         <string>IOAccelSharedUserClient2</string>
+        <!-- iPadOS 15 AGXG4P user clients (J96, kernelcache strings, 16 Nov 2026):
+             without the queue classes newCommandQueue returned nil in the foreground app. -->
+        <string>AGXCommandQueue</string>
+        <string>IOAccelCommandQueue2</string>
+        <string>AGXSharedUserClient</string>
+        <string>IOAccelContext2</string>
+        <string>AGXGLContext</string>
+        <string>IOAccelGLContext2</string>
+        <string>IOAccelMemoryInfoUserClient</string>
+        <string>IOSurfaceAcceleratorClient</string>
     </array>
 </dict></plist>
