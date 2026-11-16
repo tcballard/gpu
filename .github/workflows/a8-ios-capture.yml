@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 15
     env:
       HOMEBREW_NO_AUTO_UPDATE: '1'
