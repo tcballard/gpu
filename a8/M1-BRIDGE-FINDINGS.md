@@ -376,3 +376,44 @@ Our DWI result (DWI timing ruled out) is new information for them.
 
 `sgx` ADT check (16 Nov): there are no `function-*` hooks beyond `clock-gates`/`power-gates` (0x7c),
 and no other node points at sgx. `gfx-qos = 1 1` is unexplained (probably memory QoS).
+
+## ApplePMGR `+0x988` writes on the GFX power-on path, 16 Nov evening (READ, single analyst)
+
+**Register access slots.** These are the same in all three PMGR vtables (ApplePMGR `0x6f3ec10`,
+`0x6f432d8`, and AppleT7000PMGR `0x6f455d0`). T7000 does not override them.
+
+- `+0x980` (`0x66ed478`) is `read(region, offset, die)`.
+- `+0x988` (`0x66ed4f0`) is `write(region, offset, value, die)`, a plain 32-bit store at
+  `regionmap(region, die)+0x18 + offset`.
+- `+0x990` (`0x66ed564`) is `poll(region, offset, mask, expect, timeout, die)`.
+
+The `+0x988` call sites reachable from `_enableDeviceGated` (`0x66f4a1c`) were checked one by one
+against the GFX device entry. The entry raw is
+`0000007c 00000000 00000403 ... 02 ... 0a0b ... "GFX"`: flags 0, no parents, no power-gate helper,
+ps group 3 index 4, bridges 10 and 11.
+
+| Site / function | What it does | Runs for GFX? |
+|---|---|---|
+| `0x66e3da0`, `0x66e3ed8` (sites `0x66e3e5c`, `0x66e41cc`..`0x66e4394`) | ps register: min level, target, AUTO_ENABLE | yes; already replicated |
+| `0x66f60a8` | bridge settings (`+0x998`) | yes; already replicated |
+| `0x66ef230` (from `0x66f5f48`, logs "reset") | ps reset: dev-disable bit 10, reset bit 31, polls bits 11 and 31 | no: reached only via `ARST` function objects, which exist for i2c0/2/3, displayport and isp only |
+| `0x66efaf8` (sites `0x66efb78`, `0x66efd84`) | per-index control table at `[+0x2344]`/`[+0x2348]` (bit 5 set, low nibble) | no: needs the ADT `clusters` property, absent on J96 |
+| `0x66f6798` (called at `0x66f537c`, `0x66f584c`) | perf-domain state write (poll bit 30 clear, then state into [3:0]) | no: guarded on entry flags byte 1 bit 4 and id 8 (USBCTRL) or 14 (USB2HOST2); GFX has flags 0 |
+| `0x66f5e80` (loop over regions `0x29`..`0x2b`) | bit 0 set/clear | separate command-gated function, not in the body |
+
+**Result.** On the path read, iPadOS's PMGR does nothing for GFX beyond what Linux already does.
+This agrees with the 10 Nov trace.
+
+**Not read:** `0x66f47a0`, `0x66f2040` (conditional, called at `0x66f4b94`/`0x66f4ba0`), and any
+writes through other objects (Fender, AGXG4P, other kexts).
+
+So the missing prerequisite is probably not a PMGR register write. The remaining candidates are:
+
+1. state set before the kernel that differs between the iPadOS and Linux/Pongo boots. J81's
+   bare-PongoOS stall argues against a Pongo-only difference, but palera1n iPadOS boots through
+   Pongo too.
+2. something AGXG4P or another kext does through a non-PMGR path.
+3. a hardware dependency only an iPadOS-side read can show.
+
+The iPadOS read (new kprobe) is now the most direct next step. J81's planned `+0x988` capture would
+confirm this table empirically.

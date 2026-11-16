@@ -38,8 +38,8 @@ last: "PMGR clock snapshots, 12 and 16 Nov"), `m1-clock-wide-20261116.log`, `pro
   - The slide search reads only 2 MiB-aligned region starts.
   - `TASK_DYLD_INFO` is printed.
   - stdout is unbuffered.
-  - **Not built (no iOS SDK on this host); never compiled, so expect small fixes.**
-  - **Do not run the old `ios-capture/build/kprobe`.** The pre-fix source is at
+  - **Built 16 Nov by CI run 43925007967 (Intel macOS runner; arm64 runners had no capacity) and installed in `ios-capture/build/`, hashes checked.**
+  - The old pre-fix binaries are kept at `/tmp/claude-1000/-home-tcballard/56bd8a66-06fe-4c4c-b95d-4d3debddbbc0/scratchpad/old-build/` (never run them); the pre-fix source is at
     `/tmp/claude-1000/-home-tcballard/56bd8a66-06fe-4c4c-b95d-4d3debddbbc0/scratchpad/kprobe.c.orig`,
     which may be gone.
 - `ios-capture/README.md`, `probe/README.md`, `M1-BRIDGE-FINDINGS.md`, `m1-clock-wide-20261116.log`.
