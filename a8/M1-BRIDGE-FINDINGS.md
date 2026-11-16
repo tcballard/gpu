@@ -372,7 +372,7 @@ slot and every call to it on the GFX power-on path:
 - the dependency walk `0x66ef9bc`;
 - whether AppleT7000PMGR overrides `+0x988`.
 
-Our DWI result (DWI timing ruled out) is new information for them.
+Correction (same evening): J81 had already enabled DWI before GPC (OrchardLinux/gpu `a8x/README.md`, "Power transport"), with no page-5 change. Our DWI result confirms theirs rather than adding to it.
 
 `sgx` ADT check (16 Nov): there are no `function-*` hooks beyond `clock-gates`/`power-gates` (0x7c),
 and no other node points at sgx. `gfx-qos = 1 1` is unexplained (probably memory QoS).
@@ -417,3 +417,20 @@ So the missing prerequisite is probably not a PMGR register write. The remaining
 
 The iPadOS read (new kprobe) is now the most direct next step. J81's planned `+0x988` capture would
 confirm this table empirically.
+
+## Upstream check, 16 Nov evening (OrchardLinux/gpu `dd5e987`, PR #3, `a8x/README.md`)
+
+New since our base `a609394`: only the J81 notes. Relevant to J96:
+
+- J81 restored 20 power domains, and separately enabled DWI; neither changed page 5.
+- **LLB writes PMGR pages nobody has explained.**
+  - It sets bit 31 at five page bases, `0x20e010000`–`0x20e014000`.
+  - It copies a 47-word table to `0x20e010000`–`0x20e0100b8`.
+  - It writes six words at `0x20e00f208`–`0x20e00f21c`.
+  - Whether these survive the checkm8/Pongo path is unrecorded.
+- PMGR `0x2300c` reads 0 early under iPadOS and `0x164` after the GPU identity read.
+- Their open leads: a SoC-tuner display-idle/MCC callback before the first RGX read, and a GFX
+  `state-config` record.
+
+Next (read-only): snapshot those LLB pages, `+0xf200..+0xf21c` and `+0x2300c` on Linux, and under
+iPadOS through kprobe. Compare.

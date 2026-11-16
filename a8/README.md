@@ -19,6 +19,8 @@ Read in this order:
 2. `M0-STATIC-RE.md`: static analysis of AGXG4P (register windows, power-on, interrupts,
    META boot).
 3. `M1-BRIDGE-FINDINGS.md`: the M1 investigation, newest sections last.
+3a. `M2-IOS-CAPTURE.md`: first iPadOS ground truth (16 Nov): compute jobs ran, the shader
+    encoding matches the A10's, the dispatch layer differs.
 4. `m1-*.log`: one log per hardware run, with dates, setup and results.
 
 | Path | What |
