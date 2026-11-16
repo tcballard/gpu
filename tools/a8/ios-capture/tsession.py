@@ -112,8 +112,8 @@ def main(argv):
         print('pushed, sha256', t.push(HERE / 'build/kprobe', tool))
         args = ' '.join(argv[2:])
         for a in argv[2:]:
-            if not re.fullmatch(r'read|0x[0-9a-fA-F]+|[0-9]+', a):
-                sys.exit('kprobe arguments: read ADDR LEN (numbers only)')
+            if not re.fullmatch(r'read|regions|0x[0-9a-fA-F]+|[0-9]+', a):
+                sys.exit('kprobe arguments: regions | read ADDR LEN (numbers only)')
         rc, out = t.run(f'{tool} {args} 2>&1', seconds=60)
         sys.stdout.write(out)
         print('exit status:', rc)

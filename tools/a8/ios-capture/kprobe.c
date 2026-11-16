@@ -29,6 +29,37 @@ extern kern_return_t mach_vm_region(vm_map_t task, mach_vm_address_t *addr, mach
                                     vm_region_flavor_t flavor, vm_region_info_t info,
                                     mach_msg_type_number_t *count, mach_port_t *object);
 
+extern kern_return_t mach_vm_region_recurse(vm_map_t task, mach_vm_address_t *addr,
+                                            mach_vm_size_t *size, natural_t *depth,
+                                            vm_region_recurse_info_t info,
+                                            mach_msg_type_number_t *count);
+
+// Deepest map entry at or above *a (descends into submaps). Map query only; no memory access.
+static kern_return_t region_at(mach_port_t kt, mach_vm_address_t *a, mach_vm_size_t *size,
+                               vm_prot_t *prot, natural_t *depth_out) {
+    natural_t depth = 0;
+    for (;;) {
+        vm_region_submap_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+        mach_vm_address_t addr = *a;
+        mach_vm_size_t sz = 0;
+        natural_t d = depth;
+        kern_return_t kr = mach_vm_region_recurse(kt, &addr, &sz, &d,
+                                                  (vm_region_recurse_info_t)&info, &count);
+        if (kr != KERN_SUCCESS)
+            return kr;
+        if (info.is_submap && depth < 8) {
+            depth++;
+            continue;  // look again one level deeper at the same address
+        }
+        *a = addr;
+        *size = sz;
+        *prot = info.protection;
+        *depth_out = d;
+        return KERN_SUCCESS;
+    }
+}
+
 #define KERNEL_UNSLID_BASE 0xfffffff007004000ULL  // __TEXT of the 15.8.3 iPad5,1 kernelcache
 
 static mach_port_t kernel_task_port(const char **how) {
@@ -53,14 +84,11 @@ static mach_port_t kernel_task_port(const char **how) {
 static int readable(mach_port_t kt, uint64_t addr, size_t len) {
     mach_vm_address_t a = addr;
     mach_vm_size_t size = 0;
-    vm_region_basic_info_data_64_t info;
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t obj = MACH_PORT_NULL;
-    kern_return_t kr = mach_vm_region(kt, &a, &size, VM_REGION_BASIC_INFO_64,
-                                      (vm_region_info_t)&info, &count, &obj);
-    if (kr != KERN_SUCCESS)
+    vm_prot_t prot = 0;
+    natural_t depth = 0;
+    if (region_at(kt, &a, &size, &prot, &depth) != KERN_SUCCESS)
         return 0;
-    return a <= addr && addr + len <= a + size && (info.protection & VM_PROT_READ);
+    return a <= addr && addr + len <= a + size && (prot & VM_PROT_READ);
 }
 
 static int kread(mach_port_t kt, uint64_t addr, void *buf, size_t len) {
@@ -85,27 +113,25 @@ static int kread(mach_port_t kt, uint64_t addr, void *buf, size_t len) {
 static int find_slide(mach_port_t kt, uint64_t *slide, int list_only) {
     mach_vm_address_t a = KERNEL_UNSLID_BASE;
     const uint64_t end = KERNEL_UNSLID_BASE + 0x40000000ULL;
-    for (int n = 0; n < 4096 && a < end; n++) {
+    for (int n = 0; n < 65536 && a < end; n++) {
         mach_vm_size_t size = 0;
-        vm_region_basic_info_data_64_t info;
-        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t obj = MACH_PORT_NULL;
-        kern_return_t kr = mach_vm_region(kt, &a, &size, VM_REGION_BASIC_INFO_64,
-                                          (vm_region_info_t)&info, &count, &obj);
+        vm_prot_t prot = 0;
+        natural_t depth = 0;
+        kern_return_t kr = region_at(kt, &a, &size, &prot, &depth);
         if (kr != KERN_SUCCESS) {
-            printf("mach_vm_region at 0x%llx: kr=0x%x (%s)\n", (unsigned long long)a, kr,
+            printf("region query at 0x%llx: kr=0x%x (%s)\n", (unsigned long long)a, kr,
                    mach_error_string(kr));
             return -1;
         }
         if ((list_only && n < 64) || n < 8)
-            printf("region 0x%llx size 0x%llx prot %d\n", (unsigned long long)a,
-                   (unsigned long long)size, info.protection);
-        if (a >= end)
+            printf("region 0x%llx size 0x%llx prot %d depth %u\n", (unsigned long long)a,
+                   (unsigned long long)size, prot, depth);
+        if (a >= end || size == 0)
             break;
         // Only a region START that is a possible kernel base (unslid base + n * 2 MiB): the
         // header is the first page of its mapping, and a page inside a readable region can
         // still be unbacked.
-        if (!list_only && (info.protection & VM_PROT_READ) && a >= KERNEL_UNSLID_BASE &&
+        if (!list_only && (prot & VM_PROT_READ) && a >= KERNEL_UNSLID_BASE &&
             !((a - KERNEL_UNSLID_BASE) & 0x1fffff)) {
             uint32_t magic = 0;
             mach_vm_size_t got = 0;
