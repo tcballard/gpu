@@ -259,6 +259,10 @@ static void capture(NSString *dir) {
     }
     install_iohooks(); // the AGX driver bundle is loaded now
     id<MTLCommandQueue> q = [dev newCommandQueue];
+    if (!q) {
+        logf_(@"newCommandQueue returned nil (no GPU access for this process?)");
+        return;
+    }
     NSArray *names = gGrid ? @[ @"grid" ] : @[ @"store_marker", @"store_marker2", @"empty_kernel" ];
     NSMutableArray *keep = [NSMutableArray array];
     needle_t needles[16];
@@ -289,7 +293,15 @@ static void capture(NSString *dir) {
         n32.name = strdup([NSString stringWithFormat:@"out%lu_va32", (unsigned long)i].UTF8String);
         needles[nn++] = n32;
         id<MTLCommandBuffer> cb = [q commandBuffer];
+        if (!cb) {
+            logf_(@"commandBuffer returned nil (queue %@)", q);
+            return;
+        }
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+        if (!enc) {
+            logf_(@"computeCommandEncoder returned nil");
+            return;
+        }
         [enc setComputePipelineState:ps];
         [enc setBuffer:out offset:0 atIndex:0];
         if (gGrid)
@@ -321,6 +333,8 @@ static void capture(NSString *dir) {
             scan_and_dump(dir, [NSString stringWithFormat:@"k%lu_pre", (unsigned long)i], needles, nn);
         [cb commit];
         [cb waitUntilCompleted];
+        if (cb.error)
+            logf_(@"command buffer error: %@", cb.error);
         gHookDir = nil;
         logf_(@"iohooks: %d IOConnectCall* and %d IOConnectTrap* calls so far", gTotalCalls, gTotalTraps);
         if (!gLight)
