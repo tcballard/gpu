@@ -14,6 +14,15 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 
+// gpuResourceID is iOS 16+; iPadOS 15 (J96) has no such method on AGXA8 objects. Log 0 there.
+static uint64_t rid_(id o) {
+    if (![o respondsToSelector:@selector(gpuResourceID)])
+        return 0;
+    if (@available(iOS 16.0, *))
+        return [(id<MTLTexture>)o gpuResourceID]._impl;
+    return 0;
+}
+
 static NSString *const kSource =
     @"#include <metal_stdlib>\n"
      "using namespace metal;\n"
@@ -319,7 +328,7 @@ static void capture(NSString *dir) {
         logf_(@"%@: status %ld out[0..1] = 0x%08x 0x%08x, out gpu 0x%llx cpu %p, "
               @"pipeline resid 0x%llx, max threads %lu",
               names[i], (long)cb.status, o[0], o[1], gva, out.contents,
-              ps.gpuResourceID._impl, (unsigned long)ps.maxTotalThreadsPerThreadgroup);
+              rid_(ps), (unsigned long)ps.maxTotalThreadsPerThreadgroup);
         if (gGrid) {
             // Results, to check the dispatch and to decode the IDs against
             [[NSData dataWithBytes:out.contents length:0x4000]
@@ -660,7 +669,7 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
         tex = [dev newTextureWithDescriptor:td];
     }
     logf_(@"variant %s: device %@, target texture gpu resource 0x%llx", v->name, dev.name,
-          tex.gpuResourceID._impl);
+          rid_(tex));
     id<MTLCommandQueue> q = [dev newCommandQueue];
     // GC_REPEAT renders before the captured one: what iPadOS changes from one
     // render to the next (the A10 geometry stall, 2026-11-02)
@@ -798,7 +807,7 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
             smp.mipFilter = MTLSamplerMipFilterNearest;
             [enc setFragmentTexture:src atIndex:0];
             [enc setFragmentSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
-            logf_(@"mip texture gpu resource 0x%llx", src.gpuResourceID._impl);
+            logf_(@"mip texture gpu resource 0x%llx", rid_(src));
         }
         if (v->kind == 12) {
             static const uint32_t face[6] = { 0xffff0000u, 0xff00ff00u, 0xff0000ffu,
@@ -855,7 +864,7 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
             }
             [enc setFragmentTexture:src atIndex:0];
             [enc setFragmentSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
-            logf_(@"texture source gpu resource 0x%llx", src.gpuResourceID._impl);
+            logf_(@"texture source gpu resource 0x%llx", rid_(src));
         }
         if (v->kind == 9) {
             float c[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
@@ -883,7 +892,7 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
             id<MTLTexture> depth = [dev newTextureWithDescriptor:dd];
             [enc setFragmentTexture:depth atIndex:0];
             [enc setFragmentSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
-            logf_(@"depth texture gpu resource 0x%llx", depth.gpuResourceID._impl);
+            logf_(@"depth texture gpu resource 0x%llx", rid_(depth));
         }
         id<MTLBuffer> ibuf = nil;
         if (v->flags & RV_INDEXED) {
