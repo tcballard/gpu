@@ -1,0 +1,22 @@
+# J96: DWI register read (gpu-dwi-read), 2026-11-16 evening, fresh j96-boot, kernel 7.3.0-rc1-j96-firstboot+.
+# Module gpu/probe/apple-j96-gpubridge.ko sha256 e0d233d3...4e0f2b. Read-only; no GFX access. Completed, result=0.
+# Compared with the values iPadOS's AppleS5L8940XDWI writes at start (M1-BRIDGE-FINDINGS.md, static search section):
+# - +0x00 = 0x1 matches.
+# - +0x04 = 0x3c, iPadOS 0x78 (lockout-us 5 x 24). Linux (iBoot's value) is half.
+# - +0x50 = 0, iPadOS 0x2ee00 (str-delay 8000 x 24). NOT SET on the Linux path.
+# - +0x10 = 0x70 and +0x14 = 0xa0000628 are the backlight CTL/CMD in use (apple_dwi_bl, brightness 1576 = 0x628);
+#   iPadOS's 0x41 / 0 at start are expected to differ.
+# ps_dwi = 0xff (on). /proc/iomem: 20e200010-20e200017 claimed by the backlight driver.
+[  105.722471] J96GB_BEGIN gpu-dwi-read (no GFX access)
+[  105.728356] J96GB_DWI ps_dwi=000000ff (target f actual f) ret=0
+[  105.737481] J96GB_NEXT read DWI +0x10
+[  106.049458] J96GB_DWI +0x10 = 00000070 (iPadOS writes 00000041)  DIFFERS
+[  106.057150] J96GB_NEXT read DWI +0x14
+[  106.369439] J96GB_DWI +0x14 = a0000628 (iPadOS writes 00000000)  DIFFERS
+[  106.377198] J96GB_NEXT read DWI +0x00
+[  106.689456] J96GB_DWI +0x00 = 00000001 (iPadOS writes 00000001)
+[  106.696454] J96GB_NEXT read DWI +0x04
+[  107.009456] J96GB_DWI +0x04 = 0000003c (iPadOS writes 00000078)  DIFFERS
+[  107.017093] J96GB_NEXT read DWI +0x50
+[  107.329457] J96GB_DWI +0x50 = 00000000 (iPadOS writes 0002ee00)  DIFFERS
+[  107.337133] J96GB_STOP gpu-dwi-read result=0

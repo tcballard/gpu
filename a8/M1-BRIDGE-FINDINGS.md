@@ -257,3 +257,122 @@ Implication for J96 (INFERRED): a read-only PMGR snapshot here — the perf-slot
 control words, and `+0/+4/+8` of the six pages from `0x20e000000` — before and after `ps_gfx`
 on and at GPC 1, would show whether J96 matches J81 (table populated, page-5 bit 30 clear).
 All of it lies in pmgr reg[0], which the Linux PMGR regmap already maps.
+
+## PMGR clock snapshots, 12 and 16 Nov (`m1-clock-snap-20261112.log`, `m1-clock-wide-20261116.log`)
+
+**J96 matches J81.** Decoded with J81's fit, f = 24 MHz × fb[20:12] / (pre[8:4] × (post[3:0]+1)):
+
+- **GFX perf slots (pmgr+0x1c000 + n×0x10) are populated and match the ADT.** Slots 1–4 give
+  365/450/550/600 MHz; slots 5–8 give 182.5/225/275/300 MHz (post divider doubled). The top byte
+  goes 0x5f/0x65/0x70/0x70, which fits 600 + 3.125 mV × code = 896/915/950/950 mV (INFERRED). The
+  table does not change with GFX power or GPC state.
+- **pmgr+0x1c200** reads 0x80000000, and 0x80110100 at GPC 1. It drops back at GPC 0, so the Fender
+  request reaches PMGR. +0x1c300 = 0x40000001 is constant. Nothing else in +0x1c000..+0x1c3fc is
+  non-zero apart from the slots.
+- **Six clock pages (pmgr+0xN000) share one register layout.** Pages 1 and 4 run: +0 decodes to 792
+  and 1200 MHz with bit 31 set, and +4 = 0x40000000. Pages 0, 2 and 3 are idle: +0 = 0x1010 (24 MHz
+  × 1, reset), and +4 = 0x80000001. **Page 5 is in a third state**: +0 = 0x1010, +4 = 0, +8 bit 24
+  set, and +0x1c = 0x04040000 where the idle pages read 0x0c040000.
+- **At GPC 1, page 5 reacts but does not start.** Right after the poll, +0x1c bit 27 is set; it is
+  cleared again 1 s later. +0 and +4 never change. J81 iPadOS reads page 5 +4 = 0x40000000 after
+  the GPC poll, the running-page status.
+
+**Reading (INFERRED, now the leading hypothesis):** page 5 is the GFX PLL. Under iPadOS the state-1
+request leaves it running at the slot-1 rate. Under Linux the request reaches it (the +0x1c flicker,
++0x1c200) but it never configures or locks. Its idle state (+4 = 0 rather than 0x80000001) suggests
+an enable or ownership step that has not happened on this boot path. The RGX window has no clock,
+which fits the hang.
+
+Next (static): find what writes pmgr+0x5000..0x503c or +0x1c200/+0x1c300 in the 15.8.3
+kernelcache. Candidates are ApplePMGR's start (`0x66dc7a4`), `0x66f2040` and `0x66f47a0`, plus any
+other kext that maps pmgr reg[0]. If none does, it is iBoot (not run with GFX in mind on our path)
+or hardware, and the iPadOS read (plan M2) is the route. Do not write page 5 until the sequence and
+the GFX voltage are known.
+
+## Who writes the GFX PLL? Static search, 16 Nov (READ, single analyst, not re-checked)
+
+**No kernel code writes it with a literal offset.** Searched the 15.8.3 kernelcache: XNU
+`__TEXT_EXEC` and all of `__PLK_TEXT_EXEC`, llvm-objdump with grep on immediates.
+
+- `0x1c000`/`0x1c200`/`0x1c300` and page-5 offsets (`0x5000..0x503c` as immediates or `#0x5, lsl #12`)
+  are absent.
+- The few `0x5004`/`0x5008`/`0x500c` hits lie in unrelated kexts (struct offsets), or are object
+  fields in AppleT7000PMGR (`+0x35008`).
+- **ApplePMGR** (`__TEXT_EXEC` `0x66d6000`–`0x670aa4c`): its only `0x5000` constants build ASCII names
+  (`0x66e2e58`, `0x66e2ef4`).
+- **AppleT7000PMGR**, a SoC kext not traced before (`__TEXT_EXEC` `0x670b000`–`0x670d3e0`):
+  - Methods include `initDriver`, `setPerfState(PerfDomainID, ...)`, `perfStateChangePending`,
+    `getPerfStateTableIndex`, `configVideoClock`, `getISPRefClockFrequency`, and the `_pll4Frequency`
+    and `_apscSCRLock` strings.
+  - It registers register blocks by (id, offset) through `0x670d338`: `0x10218`, `0x1e000`, `0x2d000`,
+    `0x30000`, `0x32000`, `0x190`.
+  - None of these is page 5 or `0x1c000`.
+- The pmgr ADT node has no GFX entry in `perf-domains` (SOC, CPU only) or the voltage states, and no
+  PLL property.
+
+**Reading (INFERRED).** The host never programs the GFX PLL. The Fender state request drives
+PMGR's GFX perf state machine, which applies the perf slot (PLL fields plus a voltage code) in
+hardware. Something that machine needs is in place under iPadOS and not under Linux.
+
+Both boot paths reach the kernel through the same iBoot-then-Pongo handoff, so the missing piece
+is either done by the iPadOS kernel through a data-driven offset (not found by literal search), or
+undone or never done on the Linux side.
+
+**Ruled out:**
+- Linux switching off unused domains or clocks: `dev-image/config/bootargs` already has
+  `clk_ignore_unused pd_ignore_unused`.
+
+**Lead, weakened:**
+- DWI (the PMGR-to-PMU voltage interface). iPadOS's AppleS5L8940XDWI start (`0x6c992a4`–`0x6c994f0`):
+  1. clock gate and power gate on (device `0x36`);
+  2. DWI `+0x0 = ((nclk-div<<16) - 0x10000) | polarity-config` (= 0x1);
+  3. `+0x50 = str-delay×24/nclk-div` (= 0x2ee00);
+  4. `+0x4 = lockout-us×24` (= 0x78);
+  5. `+0x14 = 0`;
+  6. `+0x10 = 0x41`.
+- But DWI already works on Linux: the `dwi_bl` backlight (DWI `+0x10`) is enabled and in use, and
+  `0x41` is the backlight's `SEND1 | LE_DATA`. So iBoot configured DWI.
+- Still open: whether iBoot's `+0x0`, `+0x4` and `+0x50` match iPadOS's values. A read-only check of
+  those three registers under Linux settles it.
+
+**Next leads:**
+1. Read the DWI registers and `ps_dwi` on Linux (read-only).
+2. Trace AppleT7000PMGR `initDriver` and `setPerfState` in full, for data-driven writes.
+3. The iPadOS read of page 5 and `+0x1c200` with the GPU active (new kprobe).
+4. Compare with J81 again.
+
+## DWI on hardware, 16 Nov evening (`m1-dwi-read-20261116.log`, `m1-dwi-ios-clock-20261116.log`)
+
+- **Read-only.** `ps_dwi` is on (0xff). DWI `+0x0 = 0x1` matches iPadOS. `+0x4 = 0x3c`, where iPadOS
+  writes 0x78. `+0x50 = 0`, where iPadOS writes 0x2ee00. `+0x10` and `+0x14` hold the backlight's
+  CTL/CMD, which are in use.
+- **Writing iPadOS's `+0x4` and `+0x50`, then GPC 1 (no RGX access):** the writes stick, but page 5 is
+  unchanged (`+0 = 0x1010`, `+4 = 0`). **DWI timing is not the missing step.**
+
+## External evidence update: J81, read 16 Nov evening (mattonik/ipad-nixos at baa4b22)
+
+Their values come from J81 (A8X, iPadOS 15.8.5 19H394), not this device. Key notes:
+`2026-11-16-j81-agx-postpower-page5-result.md`, `-pongo-gpc-page5-result.md`,
+`-pongo-core-read-result.md` and `-pmgr-transition-gap.md`.
+
+- **When bit 30 sets.** Under iPadOS, page 5 `+0x4` is 0 after AGX's clock and power calls, still 0
+  after the Fender `+0x0 = 0x40000000` store, and `0x40000000` after the GPC `0x11` request's busy
+  poll. The hardware sets it during the state-1 transition. This fits our static result: no kernel
+  writer.
+- **Not a Linux problem.** A bare-PongoOS replay of PMGR, the bridges and GPC reached state 1 with
+  page 5 `+0x4 = 0`, and the first RGX read (`0x201000020`) stalled. The cause is not Linux-specific.
+- **Their remaining gap: the rest of ApplePMGR's device-transition path.** That means dependent-device
+  state changes, the transition and settle path, and ordinary PMGR register writes through vtable
+  `+0x988`. Their earlier capture checked `+0x988` only for page 5 itself.
+
+**Implication for J96 (INFERRED).** The next static target is ApplePMGR's `+0x988` ordinary-write
+slot and every call to it on the GFX power-on path:
+
+- the body `0x66f4ad0` and its callees `0x66f47a0` and `0x66f2040`;
+- the dependency walk `0x66ef9bc`;
+- whether AppleT7000PMGR overrides `+0x988`.
+
+Our DWI result (DWI timing ruled out) is new information for them.
+
+`sgx` ADT check (16 Nov): there are no `function-*` hooks beyond `clock-gates`/`power-gates` (0x7c),
+and no other node points at sgx. `gfx-qos = 1 1` is unexplained (probably memory QoS).

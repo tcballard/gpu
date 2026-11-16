@@ -1,0 +1,107 @@
+# J96: gpu-dwi-ios-clock, 2026-11-16 evening, same boot as m1-dwi-read-20261116.log (module reloaded).
+# Module sha256 4d86dd5c...32c6. DWI +0x04 = 0x78 and +0x50 = 0x2ee00 (iPadOS values) written, then the
+# gpu-pmgr-clock-wide sequence (ps_gfx on, bridges, Fender GPC 1, snapshots; no RGX access). Completed, result=0.
+# RESULT: negative. The writes stuck (read back, and still set at the end). GPC 1 reached, +0x1c200 ->
+# 0x80110100 as before, but page 5 unchanged: +0 = 0x1010, +4 = 0 at GPC 1 and +1 s. Page 5 +0x1c did not
+# even show the bit 27 flicker seen on 16 Nov morning. DWI timing (+0x4, +0x50) is not the missing step.
+# DWI left at the iPadOS values for the rest of this boot; the backlight kept working.
+[  230.247191] J96GB_BEGIN gpu-dwi-ios-clock (PMGR reads; no RGX access)
+[  230.254657] J96GB_DWIW before +0x04=0000003c +0x50=00000000 +0x00=00000001
+[  230.265505] J96GB_NEXT write DWI +0x04 = 0x78
+[  230.593462] J96GB_NEXT write DWI +0x50 = 0x2ee00
+[  230.913455] J96GB_DWIW after +0x04=00000078 +0x50=0002ee00 +0x00=00000001
+[  230.921242] J96GB_NEXT wide 0-gfx-off: read pmgr +0x05000..+0x0501c
+[  231.233468] J96GB_NEXT wide 0-gfx-off: read pmgr +0x05020..+0x0503c
+[  231.553469] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c200..+0x1c21c
+[  231.873471] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c220..+0x1c23c
+[  232.193465] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c240..+0x1c25c
+[  232.513467] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c260..+0x1c27c
+[  232.833514] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c280..+0x1c29c
+[  233.153466] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c2a0..+0x1c2bc
+[  233.473466] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c2c0..+0x1c2dc
+[  233.793464] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c2e0..+0x1c2fc
+[  234.113458] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c300..+0x1c31c
+[  234.433460] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c320..+0x1c33c
+[  234.753459] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c340..+0x1c35c
+[  235.073458] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c360..+0x1c37c
+[  235.393455] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c380..+0x1c39c
+[  235.713453] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c3a0..+0x1c3bc
+[  236.033458] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c3c0..+0x1c3dc
+[  236.353459] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c3e0..+0x1c3fc
+[  236.673458] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c000..+0x1c01c
+[  236.993458] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c020..+0x1c03c
+[  237.313501] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c040..+0x1c05c
+[  237.633460] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c060..+0x1c07c
+[  237.953459] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c080..+0x1c09c
+[  238.273457] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c0a0..+0x1c0bc
+[  238.593458] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c0c0..+0x1c0dc
+[  238.913458] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c0e0..+0x1c0fc
+[  239.233466] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c100..+0x1c11c
+[  239.553464] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c120..+0x1c13c
+[  239.873466] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c140..+0x1c15c
+[  240.193463] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c160..+0x1c17c
+[  240.513493] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c180..+0x1c19c
+[  240.833508] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c1a0..+0x1c1bc
+[  241.153462] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c1c0..+0x1c1dc
+[  241.473465] J96GB_NEXT wide 0-gfx-off: read pmgr +0x1c1e0..+0x1c1fc
+[  241.793465] J96GB_NEXT wide 0-gfx-off: read pmgr +0x00000..+0x0001c
+[  242.113464] J96GB_NEXT wide 0-gfx-off: read pmgr +0x00020..+0x0003c
+[  242.433466] J96GB_NEXT wide 0-gfx-off: read pmgr +0x01000..+0x0101c
+[  242.753465] J96GB_NEXT wide 0-gfx-off: read pmgr +0x01020..+0x0103c
+[  243.073466] J96GB_NEXT wide 0-gfx-off: read pmgr +0x02000..+0x0201c
+[  243.393463] J96GB_NEXT wide 0-gfx-off: read pmgr +0x02020..+0x0203c
+[  243.713462] J96GB_NEXT wide 0-gfx-off: read pmgr +0x03000..+0x0301c
+[  244.033461] J96GB_NEXT wide 0-gfx-off: read pmgr +0x03020..+0x0303c
+[  244.353467] J96GB_NEXT wide 0-gfx-off: read pmgr +0x04000..+0x0401c
+[  244.673464] J96GB_NEXT wide 0-gfx-off: read pmgr +0x04020..+0x0403c
+[  244.993465] J96GB_CW 0-gfx-off ps=00000300
+[  244.998495] J96GB_CW 0-gfx-off +0x05000: 00001010 00000000 81480348 081c8385 01ac0418 02187000 00000001 04040000
+[  245.011344] J96GB_CW 0-gfx-off +0x05020: 14790c38 000004b6 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.024419] J96GB_CW 0-gfx-off +0x1c200: 80000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.035970] J96GB_CW 0-gfx-off +0x1c300: 40000001 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.048424] J96GB_CW 0-gfx-off +0x1c000: 00000000 00000000 00000000 00000000 5f36d063 00000000 00000000 00000000
+[  245.061003] J96GB_CW 0-gfx-off +0x1c020: 6524b021 00000000 00000000 00000000 70313061 00000000 00000000 00000000
+[  245.073443] J96GB_CW 0-gfx-off +0x1c040: 70232011 00000000 00000000 00000000 5f36d067 00000000 00000000 00000000
+[  245.085875] J96GB_CW 0-gfx-off +0x1c060: 6524b023 00000000 00000000 00000000 70313063 00000000 00000000 00000000
+[  245.098508] J96GB_CW 0-gfx-off +0x1c080: 70232013 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.110981] J96GB_CW 0-gfx-off +0x00000: 00001010 80000001 80480348 081c8385 01ac0418 02187000 00000001 0c040000
+[  245.123365] J96GB_CW 0-gfx-off +0x00020: 14790c38 000004b6 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.136076] J96GB_CW 0-gfx-off +0x01000: 80042011 40000000 80480348 081c8385 01ac0418 02187000 04000040 bc040000
+[  245.148691] J96GB_CW 0-gfx-off +0x01020: 14790c38 000004b6 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.160768] J96GB_CW 0-gfx-off +0x02000: 00001010 80000001 80480348 081c8385 01ac0418 02187000 00000001 0c040000
+[  245.173312] J96GB_CW 0-gfx-off +0x02020: 14790c38 000004b6 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.185654] J96GB_CW 0-gfx-off +0x03000: 00001010 80000001 80480348 081c8385 01ac0418 02187000 00000001 0c040000
+[  245.198102] J96GB_CW 0-gfx-off +0x03020: 14790c38 000004b6 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.210661] J96GB_CW 0-gfx-off +0x04000: 80032010 40000000 88480348 081c8385 01ac0418 02187000 04000040 bd040000
+[  245.223085] J96GB_CW 0-gfx-off +0x04020: 14790c38 000004b6 00000000 00000000 00000000 00000000 00000000 00000000
+[  245.235581] J96GB_CW 0-gfx-off: all-zero groups of 8 not printed
+[  245.243798] J96GB_NEXT pmgr ps_gfx set target 0xf and poll
+[  245.569472] J96GB_PS gfx target 0xf -> reg 0x000003ff
+[  245.575584] J96GB_CW 1-ps-on ps=000003ff
+[  245.581751] J96GB_CW 1-ps-on: 0 word(s) differ from snapshot 0
+[  245.589801] J96GB_NEXT write the 33 bridge registers, no pauses
+[  245.921689] J96GB_CW 2-bridged ps=000003ff
+[  245.926625] J96GB_CW 2-bridged changed +0x0101c: bc040000 -> b8040000
+[  245.935558] J96GB_CW 2-bridged: 1 word(s) differ from snapshot 0
+[  245.943906] J96GB_NEXT write Fender+0x10000 = 0xffff0000
+[  246.277459] J96GB_NEXT write Fender+0x0 = 0x40000000
+[  246.597460] J96GB_NEXT write Fender+0x1000 = 0x11 and poll bit 4, then snapshot at once
+[  246.917946] J96GB_CW 3-gpc1 ps=000003ff
+[  246.922644] J96GB_CW 3-gpc1 changed +0x1c200: 80000000 -> 80110100
+[  246.931388] J96GB_CW 3-gpc1 changed +0x0101c: bc040000 -> b8040000
+[  246.940011] J96GB_CW 3-gpc1: 2 word(s) differ from snapshot 0
+[  246.947869] J96GB_GPC perf=00000001 after the state 1 request
+[  247.969698] J96GB_CW 4-gpc1+1s ps=000003ff
+[  247.974750] J96GB_CW 4-gpc1+1s changed +0x1c200: 80000000 -> 80110100
+[  247.983701] J96GB_CW 4-gpc1+1s changed +0x0101c: bc040000 -> b8040000
+[  247.992477] J96GB_CW 4-gpc1+1s: 2 word(s) differ from snapshot 0
+[  248.000590] J96GB_NEXT read Fender+0x1000, then write 0x10 and poll bit 4
+[  248.325701] J96GB_CW 5-gpc0 ps=000003ff
+[  248.330412] J96GB_CW 5-gpc0 changed +0x0101c: bc040000 -> b8040000
+[  248.340127] J96GB_CW 5-gpc0: 1 word(s) differ from snapshot 0
+[  248.347043] J96GB_NEXT pmgr ps_gfx set target 0x0 and poll
+[  248.673477] J96GB_PS gfx target 0x0 -> reg 0x00000300
+[  248.679493] J96GB_STOP gpu-dwi-ios-clock result=0
+[  248.686928] J96GB_CW 6-ps-off ps=00000300
+[  248.693012] J96GB_CW 6-ps-off: 0 word(s) differ from snapshot 0
+[  248.701076] J96GB_DWIW now +0x04=00000078 +0x50=0002ee00 +0x00=00000001

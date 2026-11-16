@@ -62,6 +62,13 @@
  *     trouble, and pmgr+0x5004 bit 30 was set under iPadOS at GPC 1 but not under Linux.
  *     Each PMGR group is announced before it is read.
  *
+ *   gpu-pmgr-clock-wide (16 Nov 2026): the same sequence, but every word of the six clock
+ *     pages (pmgr+0xN000..+0xN03c, N = 0..5) and of pmgr+0x1c000..+0x1c3fc. Snapshot 0 (GFX
+ *     off) reads eight words per announce and prints all non-zero groups; later snapshots
+ *     print only the words that differ from snapshot 0. Most of these words have never been
+ *     read on this hardware (a hang or a read side effect is possible; the announce names the
+ *     group). No RGX access.
+ *
  * Access envelope:
  *   - Bridges: only the (offset, value) pairs of the ADT pmgr properties bridge-settings-10 and
  *     bridge-settings-11, in list order, 32-bit, bridge 10 then bridge 11 (the order of the GFX
@@ -103,7 +110,8 @@
 #include <linux/regmap.h>
 #include <linux/sysfs.h>
 
-enum { J96GB_WRITE = 1, J96GB_ID_AUTO, J96GB_ID, J96GB_READBACK, J96GB_AUTO_WATCH, J96GB_FENDER_SCAN, J96GB_CLOCK_SNAP };
+enum { J96GB_WRITE = 1, J96GB_ID_AUTO, J96GB_ID, J96GB_READBACK, J96GB_AUTO_WATCH, J96GB_FENDER_SCAN, J96GB_CLOCK_SNAP,
+       J96GB_CLOCK_WIDE, J96GB_DWI_READ, J96GB_DWI_CLOCK };
 static const char *const j96gb_tokens[] = {
 	[J96GB_WRITE] = "gpu-bridge-write",
 	[J96GB_ID_AUTO] = "gpu-bridge-id-auto",
@@ -112,6 +120,9 @@ static const char *const j96gb_tokens[] = {
 	[J96GB_AUTO_WATCH] = "gpu-ps-auto-watch",
 	[J96GB_FENDER_SCAN] = "gpu-fender-scan",
 	[J96GB_CLOCK_SNAP] = "gpu-pmgr-clock-snapshot",
+	[J96GB_CLOCK_WIDE] = "gpu-pmgr-clock-wide",
+	[J96GB_DWI_READ] = "gpu-dwi-read",
+	[J96GB_DWI_CLOCK] = "gpu-dwi-ios-clock",
 };
 
 /* PMGR power-state register (drivers/pmdomain/apple/pmgr-pwrstate.c). */
@@ -903,20 +914,125 @@ static int j96gb_clock_snapshot(struct j96_gpubridge *gb, const char *when, bool
  * gpu-pmgr-clock-snapshot: compare the J96's PMGR clock words with J81's, around the GFX power-on
  * and the GPC 0 -> 1 transition. Fender and bridges exactly as gpu-fender-scan; no RGX access.
  */
-static int j96gb_run_clock_snap(struct j96_gpubridge *gb)
+/*
+ * gpu-pmgr-clock-wide: every word of the clock pages and of +0x1c000..+0x1c3fc. Page 5 and the
+ * control area come first, so they are the samples closest to the GPC 1 poll.
+ */
+static const struct { u32 start, words; } j96gb_wide_regions[] = {
+	{ 0x5000, 16 }, { 0x1c200, 64 }, { 0x1c300, 64 }, { 0x1c000, 64 }, { 0x1c100, 64 },
+	{ 0x0000, 16 }, { 0x1000, 16 }, { 0x2000, 16 }, { 0x3000, 16 }, { 0x4000, 16 },
+};
+#define J96GB_WIDE_WORDS (6 * 16 + 4 * 64)
+static u32 j96gb_wide_base[J96GB_WIDE_WORDS], j96gb_wide_cur[J96GB_WIDE_WORDS];
+
+static int j96gb_clock_wide(struct j96_gpubridge *gb, const char *when, bool first)
+{
+	u32 *w = first ? j96gb_wide_base : j96gb_wide_cur;
+	int r, i, k, n = 0, changed = 0, ret = 0;
+	u32 ps = 0xdeaddead;
+
+	for (r = 0; r < ARRAY_SIZE(j96gb_wide_regions); r++) {
+		for (i = 0; i < j96gb_wide_regions[r].words; i++) {
+			u32 off = j96gb_wide_regions[r].start + i * 4;
+
+			if (first && !(i % 8))
+				J96GB_ANNOUNCE(gb, "wide %s: read pmgr +0x%05x..+0x%05x", when, off,
+					       off + 0x1c);
+			ret |= j96gb_pmgr_rd(gb, off, &w[n + i]);
+		}
+		n += j96gb_wide_regions[r].words;
+	}
+	ret |= j96gb_pmgr_rd(gb, J96GB_PS_GFX, &ps);
+	dev_emerg(gb->dev, "J96GB_CW %s ps=%08x\n", when, ps);
+
+	n = 0;
+	for (r = 0; r < ARRAY_SIZE(j96gb_wide_regions); r++) {
+		for (i = 0; i < j96gb_wide_regions[r].words; i += 8) {
+			u32 off = j96gb_wide_regions[r].start + i * 4, *g = &w[n + i];
+
+			if (first) {
+				for (k = 0; k < 8 && !g[k]; k++)
+					;
+				if (k == 8)
+					continue;
+				dev_emerg(gb->dev,
+					  "J96GB_CW %s +0x%05x: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+					  when, off, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+				continue;
+			}
+			for (k = 0; k < 8; k++) {
+				if (g[k] == j96gb_wide_base[n + i + k])
+					continue;
+				changed++;
+				dev_emerg(gb->dev, "J96GB_CW %s changed +0x%05x: %08x -> %08x\n", when,
+					  off + k * 4, j96gb_wide_base[n + i + k], g[k]);
+			}
+		}
+		n += j96gb_wide_regions[r].words;
+	}
+	if (first)
+		dev_emerg(gb->dev, "J96GB_CW %s: all-zero groups of 8 not printed\n", when);
+	else
+		dev_emerg(gb->dev, "J96GB_CW %s: %d word(s) differ from snapshot 0\n", when, changed);
+	if (ret)
+		dev_emerg(gb->dev, "J96GB_CW %s: a regmap read failed (%d)\n", when, ret);
+	return ret ? -EIO : 0;
+}
+
+/*
+ * gpu-dwi-ios-clock (16 Nov 2026): DWI +0x4 = 0x78 and +0x50 = 0x2ee00, the values iPadOS's
+ * AppleS5L8940XDWI writes at start (Linux reads 0x3c and 0: m1-dwi-read-20261116.log), then the
+ * gpu-pmgr-clock-wide sequence (no RGX access). The backlight registers +0x10/+0x14 are not
+ * touched. DWI is left with the iPadOS values.
+ */
+#define J96GB_DWI_BASE_PA	0x20e200000ULL
+static int j96gb_dwi_ios(struct j96_gpubridge *gb, bool write)
+{
+	void __iomem *dwi;
+	u32 ps = 0xdeaddead;
+
+	if (regmap_read(gb->pmgr, 0x20120, &ps) || FIELD_GET(J96GB_PS_ACTUAL, ps) != J96GB_PS_ACTIVE) {
+		dev_emerg(gb->dev, "J96GB_ABORT ps_dwi=%08x is not on: no DWI access\n", ps);
+		return -EIO;
+	}
+	dwi = ioremap_np(J96GB_DWI_BASE_PA, 0x1000);
+	if (!dwi)
+		return -ENOMEM;
+	dev_emerg(gb->dev, "J96GB_DWIW %s +0x04=%08x +0x50=%08x +0x00=%08x\n",
+		  write ? "before" : "now", readl(dwi + 0x4), readl(dwi + 0x50), readl(dwi + 0x0));
+	if (write) {
+		J96GB_ANNOUNCE(gb, "write DWI +0x04 = 0x78");
+		writel(0x78, dwi + 0x4);
+		J96GB_ANNOUNCE(gb, "write DWI +0x50 = 0x2ee00");
+		writel(0x2ee00, dwi + 0x50);
+		dev_emerg(gb->dev, "J96GB_DWIW after +0x04=%08x +0x50=%08x +0x00=%08x\n",
+			  readl(dwi + 0x4), readl(dwi + 0x50), readl(dwi + 0x0));
+	}
+	iounmap(dwi);
+	return 0;
+}
+
+static int j96gb_run_clock_snap(struct j96_gpubridge *gb, int mode)
 {
 	struct device *dev = gb->dev;
+	int (*snap)(struct j96_gpubridge *, const char *, bool) =
+		mode != J96GB_CLOCK_SNAP ? j96gb_clock_wide : j96gb_clock_snapshot;
 	u32 v;
 	int i, ret;
 
-	dev_emerg(dev, "J96GB_BEGIN %s (PMGR reads; no RGX access)\n", j96gb_tokens[J96GB_CLOCK_SNAP]);
-	ret = j96gb_clock_snapshot(gb, "0-gfx-off", true);
+	dev_emerg(dev, "J96GB_BEGIN %s (PMGR reads; no RGX access)\n", j96gb_tokens[mode]);
+	if (mode == J96GB_DWI_CLOCK) {
+		ret = j96gb_dwi_ios(gb, true);
+		if (ret)
+			return ret;
+	}
+	ret = snap(gb, "0-gfx-off", true);
 	if (ret)
 		goto out;
 	ret = j96gb_ps_set(gb, J96GB_PS_ACTIVE);
 	if (ret)
 		goto out;
-	ret = j96gb_clock_snapshot(gb, "1-ps-on", false);
+	ret = snap(gb, "1-ps-on", false);
 	if (ret)
 		goto out;
 
@@ -928,7 +1044,7 @@ static int j96gb_run_clock_snap(struct j96_gpubridge *gb)
 		writel(j96gb_bridge10[i].val, gb->bridge10 + j96gb_bridge10[i].off);
 	for (i = 0; i < ARRAY_SIZE(j96gb_bridge11); i++)
 		writel(j96gb_bridge11[i].val, gb->bridge11 + j96gb_bridge11[i].off);
-	ret = j96gb_clock_snapshot(gb, "2-bridged", false);
+	ret = snap(gb, "2-bridged", false);
 	if (ret)
 		goto out;
 
@@ -954,11 +1070,11 @@ static int j96gb_run_clock_snap(struct j96_gpubridge *gb)
 		goto out;
 	}
 	/* The PMGR snapshot right after the poll, as J81's iPadOS capture did. */
-	ret = j96gb_clock_snapshot(gb, "3-gpc1", false);
+	ret = snap(gb, "3-gpc1", false);
 	dev_emerg(dev, "J96GB_GPC perf=%08x after the state 1 request\n", v);
 	if (!ret && FIELD_GET(FNDR_PERF_STATE, v) == 1) {
 		msleep(1000);
-		ret = j96gb_clock_snapshot(gb, "4-gpc1+1s", false);
+		ret = snap(gb, "4-gpc1+1s", false);
 	}
 
 	/* Never write Fender while a transition is pending: check again right before the write. */
@@ -982,12 +1098,54 @@ static int j96gb_run_clock_snap(struct j96_gpubridge *gb)
 		if (!ret)
 			ret = -EIO;
 	}
-	if (j96gb_clock_snapshot(gb, "5-gpc0", false) && !ret)
+	if (snap(gb, "5-gpc0", false) && !ret)
 		ret = -EIO;
 out:
-	ret = j96gb_power_down(gb, J96GB_CLOCK_SNAP, false, ret);
-	j96gb_clock_snapshot(gb, "6-ps-off", false);
+	ret = j96gb_power_down(gb, mode, false, ret);
+	snap(gb, "6-ps-off", false);
+	if (mode == J96GB_DWI_CLOCK)
+		j96gb_dwi_ios(gb, false);
 	return ret;
+}
+
+/*
+ * gpu-dwi-read (16 Nov 2026): read-only. ps_dwi (pmgr+0x20120), then DWI (PA 0x20e200000)
+ * +0x0, +0x4, +0x10, +0x14, +0x50, the five registers iPadOS's AppleS5L8940XDWI writes at start
+ * (0x1, 0x78, 0x41, 0, 0x2ee00). +0x10/+0x14 are the backlight CTL/CMD that apple_dwi_bl uses;
+ * +0x0/+0x4/+0x50 have not been read on this hardware. No GFX access, ps_gfx stays off.
+ */
+#define J96GB_PS_DWI	0x20120
+#define J96GB_DWI_PA	0x20e200000ULL
+static int j96gb_run_dwi_read(struct j96_gpubridge *gb)
+{
+	static const u32 offs[] = { 0x10, 0x14, 0x0, 0x4, 0x50 };
+	static const u32 ios[] = { 0x41, 0x0, 0x1, 0x78, 0x2ee00 };
+	struct device *dev = gb->dev;
+	void __iomem *dwi;
+	u32 ps = 0xdeaddead, v;
+	int i, ret;
+
+	dev_emerg(dev, "J96GB_BEGIN %s (no GFX access)\n", j96gb_tokens[J96GB_DWI_READ]);
+	ret = regmap_read(gb->pmgr, J96GB_PS_DWI, &ps);
+	dev_emerg(dev, "J96GB_DWI ps_dwi=%08x (target %lx actual %lx) ret=%d\n", ps,
+		  FIELD_GET(J96GB_PS_TARGET, ps), FIELD_GET(J96GB_PS_ACTUAL, ps), ret);
+	if (ret || FIELD_GET(J96GB_PS_ACTUAL, ps) != J96GB_PS_ACTIVE) {
+		dev_emerg(dev, "J96GB_ABORT ps_dwi is not on: no DWI read\n");
+		return -EIO;
+	}
+	/* Not a resource request: apple_dwi_bl owns 0x20e200010-17. Non-posted, as arm-io needs. */
+	dwi = ioremap_np(J96GB_DWI_PA, 0x1000);
+	if (!dwi)
+		return -ENOMEM;
+	for (i = 0; i < ARRAY_SIZE(offs); i++) {
+		J96GB_ANNOUNCE(gb, "read DWI +0x%02x", offs[i]);
+		v = readl(dwi + offs[i]);
+		dev_emerg(dev, "J96GB_DWI +0x%02x = %08x (iPadOS writes %08x)%s\n", offs[i], v, ios[i],
+			  v == ios[i] ? "" : "  DIFFERS");
+	}
+	iounmap(dwi);
+	dev_emerg(dev, "J96GB_STOP %s result=0\n", j96gb_tokens[J96GB_DWI_READ]);
+	return 0;
 }
 
 static bool j96gb_ps_off(u32 v)
@@ -1032,7 +1190,12 @@ static ssize_t attempt_store(struct device *dev, struct device_attribute *attr,
 			ret = j96gb_run_fender_scan(gb);
 			break;
 		case J96GB_CLOCK_SNAP:
-			ret = j96gb_run_clock_snap(gb);
+		case J96GB_CLOCK_WIDE:
+		case J96GB_DWI_CLOCK:
+			ret = j96gb_run_clock_snap(gb, mode);
+			break;
+		case J96GB_DWI_READ:
+			ret = j96gb_run_dwi_read(gb);
 			break;
 		default:
 			ret = j96gb_run(gb, mode);

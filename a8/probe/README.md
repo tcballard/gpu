@@ -149,3 +149,12 @@ What to look for in the `J96GB_CS` lines:
   f = 24 MHz × fb[20:12] / (pre[8:4] × (post[3:0] + 1)) as fitted on J81.
 - `page5 +4` at `3-gpc1`: 0x40000000 would match iPadOS on J81; 0 would match J81 Linux.
 - Any word that changes between `1-ps-on`, `3-gpc1` and `5-gpc0`.
+
+## `gpu-pmgr-clock-wide` (added 16 Nov)
+
+The `gpu-pmgr-clock-snapshot` sequence, reading every word of the six clock pages
+(pmgr `+0xN000..+0xN03c`, N = 0..5) and all of `+0x1c000..+0x1c3fc`; page 5 and the control area
+are read first. Snapshot `0-gfx-off` announces each group of eight reads and prints every non-zero
+group (`J96GB_CW <when> +0x.....: ...`). Later snapshots print only the words that differ from
+snapshot 0 (`J96GB_CW <when> changed +0x.....: old -> new`). Run by `../tools/serial/stream.py
+gpu-pmgr-clock-wide 120 LOG`; result in `../m1-clock-wide-20261116.log`.
