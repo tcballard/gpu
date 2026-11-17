@@ -158,3 +158,18 @@ are read first. Snapshot `0-gfx-off` announces each group of eight reads and pri
 group (`J96GB_CW <when> +0x.....: ...`). Later snapshots print only the words that differ from
 snapshot 0 (`J96GB_CW <when> changed +0x.....: old -> new`). Run by `../tools/serial/stream.py
 gpu-pmgr-clock-wide 120 LOG`; result in `../m1-clock-wide-20261116.log`.
+
+## gpu-pmgr-handoff-snap (17 Nov 2026, read-only)
+
+M1 route step 1: do the Pongo-shell state and the Linux state match? The token reads 671 PMGR
+words in a fixed order: clock pages 0–5 (+0..+0x3c), the GFX perf area +0x1c000..+0x1c3fc,
+the 72 ps registers named by the ADT, +0x2300c, +0xf208..+0xf21c, then the LLB pages
++0x10000..+0x100bc and +0x11000..+0x140bc (never read before, so last). It makes no writes, does
+not power GFX and does not touch RGX. The list lives in `../tools/handoff_regs.py`; the C table
+must match it (both are checked by hand-run script, see the session notes).
+
+- Pongo half: `./j96-boot --pongo-snapshot` (peeks through pongoterm, then asks to continue
+  the same boot into Linux).
+- Linux half: `../tools/linux-handoff-snap.sh` on that boot, before any other token.
+- Both logs go to `~/Projects/j96-omarchy/private/handoff-snap-*/`;
+  `../tools/handoff_regs.py diff pongo.log linux.log` compares them.

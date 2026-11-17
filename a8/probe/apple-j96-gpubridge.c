@@ -111,7 +111,7 @@
 #include <linux/sysfs.h>
 
 enum { J96GB_WRITE = 1, J96GB_ID_AUTO, J96GB_ID, J96GB_READBACK, J96GB_AUTO_WATCH, J96GB_FENDER_SCAN, J96GB_CLOCK_SNAP,
-       J96GB_CLOCK_WIDE, J96GB_DWI_READ, J96GB_DWI_CLOCK };
+       J96GB_CLOCK_WIDE, J96GB_DWI_READ, J96GB_DWI_CLOCK, J96GB_HANDOFF_SNAP };
 static const char *const j96gb_tokens[] = {
 	[J96GB_WRITE] = "gpu-bridge-write",
 	[J96GB_ID_AUTO] = "gpu-bridge-id-auto",
@@ -123,6 +123,7 @@ static const char *const j96gb_tokens[] = {
 	[J96GB_CLOCK_WIDE] = "gpu-pmgr-clock-wide",
 	[J96GB_DWI_READ] = "gpu-dwi-read",
 	[J96GB_DWI_CLOCK] = "gpu-dwi-ios-clock",
+	[J96GB_HANDOFF_SNAP] = "gpu-pmgr-handoff-snap",
 };
 
 /* PMGR power-state register (drivers/pmdomain/apple/pmgr-pwrstate.c). */
@@ -1148,6 +1149,81 @@ static int j96gb_run_dwi_read(struct j96_gpubridge *gb)
 	return 0;
 }
 
+/*
+ * gpu-pmgr-handoff-snap (17 Nov 2026): read-only, no GFX access, ps_gfx stays off. The same
+ * PMGR words that tools/handoff_regs.py peeks at the PongoOS shell, in the same order, so the
+ * two logs can be diffed (handoff_regs.py diff). Run it first on a fresh boot, before any
+ * token that powers GFX. The never-read LLB pages come last; each region is announced first.
+ * Output: "J96GB_HS <region> 20e0xxxxx=vvvvvvvv ..." with six words per line.
+ */
+static const u32 j96gb_hs_ps[] = {
+	0x20000, 0x20008, 0x20040,
+	0x20100, 0x20108, 0x20110, 0x20118, 0x20120, 0x20128, 0x20130, 0x20138,
+	0x20140, 0x20148, 0x20150, 0x20158, 0x20160, 0x20168, 0x20170, 0x20178,
+	0x20180, 0x20188, 0x20190, 0x20198, 0x201a0, 0x201a8, 0x201b0, 0x201b8,
+	0x201c0, 0x201c8, 0x201d0, 0x201d8, 0x201e0, 0x201e8, 0x201f0, 0x201f8,
+	0x20200, 0x20208, 0x20210, 0x20218, 0x20220, 0x20230, 0x20238, 0x20240, 0x20248,
+	0x20250, 0x20258, 0x20260, 0x20268, 0x20278, 0x20288, 0x20290, 0x20298, 0x202a0,
+	0x202a8, 0x202b0, 0x202b8, 0x202c0, 0x202c8, 0x202d0, 0x202d8, 0x202e0, 0x202e8,
+	0x202f0,
+	0x20300, 0x20308, 0x20310, 0x20318, 0x20320,
+	0x20400,
+	0x21000, 0x21008, 0x21010,
+};
+static_assert(ARRAY_SIZE(j96gb_hs_ps) == 72);
+
+/* words == 0 marks the ps list. Must match REGIONS in tools/handoff_regs.py. */
+static const struct { const char *name; u32 start, words; } j96gb_hs_regions[] = {
+	{ "page5", 0x05000, 16 }, { "page0", 0x00000, 16 }, { "page1", 0x01000, 16 },
+	{ "page2", 0x02000, 16 }, { "page3", 0x03000, 16 }, { "page4", 0x04000, 16 },
+	{ "gfxperf", 0x1c000, 256 }, { "ps", 0, 0 }, { "x2300c", 0x2300c, 1 },
+	{ "f208", 0x0f208, 6 }, { "llb10", 0x10000, 48 },
+	{ "llb11", 0x11000, 1 }, { "llb12", 0x12000, 1 }, { "llb13", 0x13000, 1 },
+	{ "llb14", 0x14000, 1 },
+	{ "llb11w", 0x11004, 47 }, { "llb12w", 0x12004, 47 }, { "llb13w", 0x13004, 47 },
+	{ "llb14w", 0x14004, 47 },
+};
+#define J96GB_HS_MAX 256
+#define J96GB_PMGR_PA 0x20e000000ULL
+
+static int j96gb_run_handoff_snap(struct j96_gpubridge *gb)
+{
+	static u32 off[J96GB_HS_MAX], val[J96GB_HS_MAX];
+	struct device *dev = gb->dev;
+	int r, i, j, n, ret = 0, total = 0;
+	char line[160];
+
+	dev_emerg(dev, "J96GB_BEGIN %s (read-only, no GFX access)\n",
+		  j96gb_tokens[J96GB_HANDOFF_SNAP]);
+	for (r = 0; r < ARRAY_SIZE(j96gb_hs_regions); r++) {
+		n = j96gb_hs_regions[r].words ? j96gb_hs_regions[r].words : ARRAY_SIZE(j96gb_hs_ps);
+		for (i = 0; i < n; i++)
+			off[i] = j96gb_hs_regions[r].words ? j96gb_hs_regions[r].start + i * 4 :
+							     j96gb_hs_ps[i];
+		J96GB_ANNOUNCE(gb, "handoff: read %s pmgr +0x%05x..+0x%05x (%d words)",
+			       j96gb_hs_regions[r].name, off[0], off[n - 1], n);
+		for (i = 0; i < n; i++) {
+			int e = j96gb_pmgr_rd(gb, off[i], &val[i]);
+
+			if (e)
+				dev_emerg(dev, "J96GB_HS read +0x%05x failed (%d)\n", off[i], e);
+			ret |= e;
+		}
+		for (i = 0; i < n; i += 6) {
+			int len = 0;
+
+			for (j = i; j < n && j < i + 6; j++)
+				len += scnprintf(line + len, sizeof(line) - len, " %09llx=%08x",
+						 J96GB_PMGR_PA + off[j], val[j]);
+			dev_emerg(dev, "J96GB_HS %s%s\n", j96gb_hs_regions[r].name, line);
+		}
+		total += n;
+	}
+	dev_emerg(dev, "J96GB_STOP %s words=%d result=%d\n", j96gb_tokens[J96GB_HANDOFF_SNAP],
+		  total, ret ? -EIO : 0);
+	return ret ? -EIO : 0;
+}
+
 static bool j96gb_ps_off(u32 v)
 {
 	return !FIELD_GET(J96GB_PS_TARGET, v) && !FIELD_GET(J96GB_PS_ACTUAL, v) &&
@@ -1196,6 +1272,9 @@ static ssize_t attempt_store(struct device *dev, struct device_attribute *attr,
 			break;
 		case J96GB_DWI_READ:
 			ret = j96gb_run_dwi_read(gb);
+			break;
+		case J96GB_HANDOFF_SNAP:
+			ret = j96gb_run_handoff_snap(gb);
 			break;
 		default:
 			ret = j96gb_run(gb, mode);

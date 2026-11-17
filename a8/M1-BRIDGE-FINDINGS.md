@@ -434,3 +434,33 @@ New since our base `a609394`: only the J81 notes. Relevant to J96:
 
 Next (read-only): snapshot those LLB pages, `+0xf200..+0xf21c` and `+0x2300c` on Linux, and under
 iPadOS through kprobe. Compare.
+
+## Handoff snapshot, Pongo vs Linux, same boot (17 Nov; READ on hardware)
+
+Route step 1. One cold boot: `./j96-boot --pongo-snapshot` peeked 671 PMGR words at the PongoOS
+shell (the same palera1n beta3 + bundled Pongo that the iPadOS jailbreak boot uses), then the same
+boot went on to Linux, where the read-only token `gpu-pmgr-handoff-snap` read the same words about
+40 s after boot. Tools: `tools/handoff_regs.py`, `tools/pongo-handoff-snap.sh`,
+`tools/linux-handoff-snap.sh`. Raw logs in `private/handoff-snap-20261117-095649-UKjW/`.
+
+**Identical:** clock pages 0–4 (+0..+0x3c), the GFX perf area +0x1c000..+0x1c3fc (slots,
++0x1c200 = 0x80000000, +0x1c300), `+0x2300c` (0 in both), `+0xf208..+0xf21c` (0 in both), the LLB
+table +0x10000..+0x100bc (all 48 words non-zero, unchanged), the bit-31 page bases
++0x11000..+0x14000, and the rest of those pages (all zero). `ps_gfx` is off in both. So the LLB
+state does survive checkm8/Pongo and is not undone by m1n1 or Linux.
+
+**Different, with an obvious explanation (24 ps registers):** CPU1 on under Linux; AUTO_ENABLE
+(bit 28) set by the Linux PMGR driver on the always-on domains (LIO, IOMUX, SIO, MCC, MCU, SMX, SF,
+DISP_BUSMUX, DISP0, SEP); unused I2C2/3 and UART1–8 (except UART5) powered off by Linux; SPI1 (touch)
+and PCIE_REF/PCIE (Wi-Fi) powered on; AMP (+0x20240) on auto and clock-gated (actual 4).
+
+**Different, unexplained (1 word): page 5 +0x1c bit 27.** Pongo reads 0x0c040000, like every idle
+page (0, 2, 3); Linux reads 0x04040000, and so did the 16 Nov boot. All other page-5 words match
+(+0 = 0x1010, +4 = 0, +8 = 0x81480348). On 16 Nov this bit came back on right after the GPC 1 poll
+and was clear again 1 s later. Nothing in our Linux DTS addresses page 5; m1n1 (prebuilt) not checked.
+
+**Reading (INFERRED).** The pre-kernel assumption mostly holds: what LLB/iBoot set up reaches Linux
+intact, so the missing step is not lost bootloader state. The one exception is page 5 +0x1c bit 27,
+the GFX PLL page itself: it is cleared somewhere between the Pongo shell and Linux userspace (m1n1,
+early Linux, or a hardware side effect of a domain change such as AMP auto-gating). Whether iPadOS
+still has it set when AGXG4P powers GFX is the open question.
