@@ -56,10 +56,28 @@ static void log_call(const char *kind, mach_port_t conn, uint32_t sel, const uin
     save([NSString stringWithFormat:@"call_%03d_out.bin", n], sout, nsout);
 }
 
+static void dump_tree(NSString *prefix, uintptr_t addr, vm_size_t len, int depth, int *budget);
+
+// Method calls (the A8 submits through selector 1 with a 32-byte struct holding two userspace
+// pointers): dump what every pointer-looking word of the struct input points to, two levels deep,
+// before and after the call. Reads go through vm_read_overwrite on this task, which fails cleanly
+// on unmapped addresses.
+static void dump_struct_ptrs(int n, const char *when, const void *sin, size_t nsin) {
+    if (!gHookDir || !sin || nsin < 8)
+        return;
+    int budget = 64;
+    const uint64_t *w = sin;
+    for (size_t i = 0; i < nsin / 8 && i < 64; i++)
+        dump_tree([NSString stringWithFormat:@"call_%03d_%s_s%zx", n, when, i * 8], (uintptr_t)w[i],
+                  0x1000, 2, &budget);
+}
+
 static kern_return_t hook_call(mach_port_t c, uint32_t sel, const uint64_t *in, uint32_t nin,
                                const void *sin, size_t nsin, uint64_t *out, uint32_t *nout,
                                void *sout, size_t *nsout) {
+    dump_struct_ptrs(gCallNo, "pre", sin, nsin);
     kern_return_t kr = real_call(c, sel, in, nin, sin, nsin, out, nout, sout, nsout);
+    dump_struct_ptrs(gCallNo, "post", sin, nsin);
     log_call("sync", c, sel, in, nin, sin, nsin, kr, out, nout ? *nout : 0, sout, nsout ? *nsout : 0);
     return kr;
 }
@@ -68,7 +86,9 @@ static kern_return_t hook_async(mach_port_t c, uint32_t sel, mach_port_t wake, u
                                 uint32_t nref, const uint64_t *in, uint32_t nin, const void *sin,
                                 size_t nsin, uint64_t *out, uint32_t *nout, void *sout,
                                 size_t *nsout) {
+    dump_struct_ptrs(gCallNo, "pre", sin, nsin);
     kern_return_t kr = real_async(c, sel, wake, ref, nref, in, nin, sin, nsin, out, nout, sout, nsout);
+    dump_struct_ptrs(gCallNo, "post", sin, nsin);
     log_call("async", c, sel, in, nin, sin, nsin, kr, out, nout ? *nout : 0, sout, nsout ? *nsout : 0);
     return kr;
 }
