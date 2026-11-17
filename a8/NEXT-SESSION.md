@@ -1,132 +1,122 @@
-# Next session — J96 GPU bring-up, written 16 Nov 2026 07:40
+# Next session: J96 GPU bring-up (handoff written 17 Nov 2026)
 
-Read first, in order: `GPU-PLAN.md`, `M0-STATIC-RE.md`, `M1-BRIDGE-FINDINGS.md` (newest sections
-last: "PMGR clock snapshots, 12 and 16 Nov"), `m1-clock-wide-20261116.log`, `probe/README.md`,
-`ios-capture/README.md` (Status section).
+iPad mini 4 (J96, iPad5,1, A8/T7000). Work lives in `~/Projects/j96-omarchy/gpu/`. It is mirrored
+to GitHub `tcballard/gpu`: notes, logs and probe in branch `a8-bringup`, folder `a8/`; iOS tools
+in branch `a8-ios-capture`, folder `tools/a8/ios-capture/`. Local clone:
+`~/Projects/orchard-gpu-fork`. `gh` needs `-R tcballard/gpu`, because its default is upstream
+OrchardLinux/gpu.
+
+**Read first:** `GPU-PLAN.md`, `M0-STATIC-RE.md`, `M1-BRIDGE-FINDINGS.md` and `M2-IOS-CAPTURE.md`,
+newest sections last in each.
 
 ## Where it stands
 
-- **M0 (static RE): done.** The iOS power-on, register windows, IRQs, kick and META boot are known.
-- **M1 (core ID read): blocked.** The first RGX read (`RGX+0x20`) freezes the SoC every time.
-  These are all ruled out: ps_gfx (works), the GFX bridge settings (written and read back), AUTO_ENABLE
-  (does not stick), Fender GPC 1 (reached), timing (nothing changes over 1 s), and a Fender clock table
-  (none).
-- **Leading hypothesis (INFERRED): the GFX PLL never starts.**
-  - PMGR clock page 5 (`pmgr+0x5000`, PA `0x20e005000`) looks like neither the running pages (1, 4)
-    nor the idle ones (0, 2, 3): `+0 = 0x1010`, `+4 = 0`.
-  - At GPC 1, `+0x1c200` goes `0x80000000 -> 0x80110100` and page 5 `+0x1c` briefly gains bit 27,
-    but `+0`/`+4` never change.
-  - J81 under iPadOS reads page 5 `+4 = 0x40000000` after the GPC poll.
-  - The GFX perf-slot table (`pmgr+0x1c000`) is populated and correct (365/450/550/600 MHz, and
-    the voltage codes match the ADT).
-- **M2 (iPadOS ground truth): first attempt panicked.**
-  - The palera1n boot works (recipe below).
-  - The root telnet session works, on Darwin 21.6.0 T7000.
-  - The old `kprobe` panicked the iPad on 9 Nov (previously unrecorded) and on 16 Nov. A read of an
-    UNMAPPED kernel VA through palera1n's kernel task port is a data abort
-    (`panic-full-2026-11-09-230600`: far = `0xfffffff007004000`, the unslid base).
-  - So the port is obtainable. The slide changes per boot (`0x1e400000`, `0x1ee00000` seen).
-- **Not started:** M3 onwards, display track D0.
+| Milestone | State |
+|---|---|
+| M0 static RE of AGXG4P | done |
+| **M1 core ID read under Linux** | **blocked.** The first RGX read freezes the SoC: the GFX PLL (PMGR clock page 5, PA `0x20e005000`) never starts. |
+| M2 iPadOS ground truth | largely done |
+| M3 onwards, display track D0 | not started |
 
-## Uncommitted local changes (not on GitHub)
+**M1: ruled out so far.**
+- On hardware: ps_gfx, the GFX bridge settings (written and read back), AUTO_ENABLE, Fender GPC 1,
+  timing, a Fender clock table, unused-domain shutdown (`pd_ignore_unused` is already set), and
+  DWI timing (iPadOS's `+0x4`/`+0x50` written, page 5 unchanged).
+- Statically: no iPadOS kernel code writes page 5 or the GFX perf area by literal, and no ApplePMGR
+  `+0x988` write on the GFX power-on path is missing from Linux.
+- J81 (A8X, OrchardLinux/gpu `a8x/`) agrees: under iPadOS, page 5 `+4` bit 30 is set during the
+  state-1 poll, and a bare-PongoOS replay stalls just like Linux.
 
-- `probe/apple-j96-gpubridge.c`: new token `gpu-pmgr-clock-wide`. Built:
-  `probe/apple-j96-gpubridge.ko`, sha256 `3b9f9aa6…59cbb1`.
-- `ios-capture/kprobe.c`: the safe kprobe.
-  - `mach_vm_region` checks before any read.
-  - `kprobe regions` lists the kernel map and reads nothing.
-  - The slide search reads only 2 MiB-aligned region starts.
-  - `TASK_DYLD_INFO` is printed.
-  - stdout is unbuffered.
-  - **Built 16 Nov by CI run 43925007967 (Intel macOS runner; arm64 runners had no capacity) and installed in `ios-capture/build/`, hashes checked.**
-  - The old pre-fix binaries are kept at `/tmp/claude-1000/-home-tcballard/56bd8a66-06fe-4c4c-b95d-4d3debddbbc0/scratchpad/old-build/` (never run them); the pre-fix source is at
-    `/tmp/claude-1000/-home-tcballard/56bd8a66-06fe-4c4c-b95d-4d3debddbbc0/scratchpad/kprobe.c.orig`,
-    which may be gone.
-- `ios-capture/README.md`, `probe/README.md`, `M1-BRIDGE-FINDINGS.md`, `m1-clock-wide-20261116.log`.
-- The GitHub mirror (`~/Projects/orchard-gpu-fork`, `tcballard/gpu`) has none of this yet.
-  - Branch `a8-bringup`, folder `a8/`: docs, logs, probe.
-  - Branch `a8-ios-capture`, folder `tools/a8/ios-capture/`: CI builds on push to that path.
-  - `gh` needs `-R tcballard/gpu` (its default is upstream OrchardLinux/gpu).
-  - Ask the user before pushing.
+**M1: still open.** LLB-written PMGR pages (`0x20e010000`–`0x20e0140bc`, `0x20e00f208`–`21c`) and
+`0x2300c` have not been compared between Linux and iPadOS. Neither have the two conditional
+ApplePMGR functions (`0x66f47a0`, `0x66f2040`). The iPadOS read of page 5 needs the kernel slide:
+`kprobe`'s map queries cannot find it, and palera1n does not print it.
 
-## Update, 16 Nov evening
-
-- **kprobe fix pushed:** commit `111fac5` on `a8-ios-capture` (kprobe.c + tsession.py), CI run
-  43919266598. Download artifact `j96-ios-capture` into `ios-capture/build/` and check
-  `SHA256SUMS`. If the build failed, fix the compile errors (never compiled before).
-- **Static search done** (`M1-BRIDGE-FINDINGS.md`, last section). No kernel code writes page 5 or
-  `+0x1c200` by literal. `pd_ignore_unused` is already set. DWI is used by the backlight, so it is
-  largely configured.
-- **DWI checked on hardware (16 Nov evening): ruled out.** `+0x50` is 0 on Linux, but writing iPadOS's `+0x4` and `+0x50` does not start page 5 (`m1-dwi-ios-clock-20261116.log`).
-- **New static target:** AppleT7000PMGR `initDriver` / `setPerfState`
-  (`__TEXT_EXEC 0x670b000-0x670d3e0`).
-
-## Update, 17 Nov
-
-- **M2 is largely done** (`M2-IOS-CAPTURE.md`): compute jobs ran under iPadOS. The USC, PDS and
-  binding formats match the A10; the CDM records are stock Rogue (7 words). The submit is selector
-  1 with shared-memory IDs and completion tags. The kernel path is traced down to AGXG4P's
-  command-queue overrides (`0x66931b8`, `0x6693234`).
-- **Resume the static trace at `0x6693234`** (range submit to the firmware queue block). The
-  previous session stopped there.
-- Captures are in `~/Projects/j96-omarchy/private/gpu-capture-2026111{6,7}*` (never commit them).
-  `GPUCapture.app` (rebuilt 17 Nov) runs light mode when `/var/mobile/gpu-capture-light` exists.
-- **M1 (the GFX PLL) is still the gate** for everything on Linux.
-- Orchard PR #155 (J96 feature states) is open.
+**M2, decoded from the captures:**
+- The USC shader encoding, the pipeline-heap layout, the PDS programs and data, and the
+  argument-table/binding DMA all match the A10.
+- The **CDM records are stock Rogue, 7 words** (KERNEL0/1/2/3–5/8, Mesa `cdm.xml`). The A10's 8th
+  word is an Apple extension.
+- The **submit** is IOAccelCommandQueue2 selector 1: `{0, count}` plus
+  `count × {cmdbuf shmem ID, segment-list shmem ID, tag0, tag1}`.
+- The segment-list format is decoded. The kernel path is traced down to AGXG4P's command-queue
+  overrides: `+0x668` → `0x66931b8`, `+0x670` → `0x6693234`.
 
 ## Next steps, in order
 
-1. **Rebuild kprobe.** Either copy `ios-capture/kprobe.c` into the fork's `tools/a8/ios-capture/`,
-   commit on `a8-ios-capture` and push (user OK needed), then download artifact `j96-ios-capture` and
-   check `SHA256SUMS`. Or the user builds on their Mac (full Xcode plus `brew install ldid`, then
-   `sh build.sh`; do not copy `build/`, which holds an SSH key).
-2. **Static search (no iPad needed).** In the 15.8.3 kernelcache, find what writes `pmgr+0x5000..0x503c`
-   (page 5) or `+0x1c200`/`+0x1c300`.
-   - Candidates: ApplePMGR start `0x66dc7a4`, untraced `0x66f2040` (has delays) and `0x66f47a0`,
-     and any kext mapping pmgr reg[0].
-   - Kernelcache: `~/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2`.
-   - Tools: `tools/kc.py`, `tools/dis.py`.
-   - If no writer exists, it is iBoot or hardware, and the iPadOS read (step 3) is the route.
-3. **iPadOS session with the new kprobe.**
-   - Run `kprobe regions` first. Then plain `kprobe`, only if the regions look sane (the kernel text
-     near `0xfffffff007004000 + slide`).
-   - Then write a tool that reads page 5 and `+0x1c200` through ApplePMGR's own mapping with the GPU
-     active. Never point kprobe at MMIO directly.
-   - `gpu-capture --light` for a first shader capture needs no kernel access.
-4. Check `mattonik/ipad-nixos` `research/` for updates since 583540b (11 Nov); J81 has the same hang.
-5. **Do not write PMGR page 5 by hand** until the sequence and the GFX voltage are known.
+1. **Static: resume at AGXG4P `0x6693234`** (the command-buffer range submit). Follow it to the
+   firmware queue block `[queue+0x120]` and the CL ring entry (`0x669cb30`, kick `0x66a33fc`).
+   This is the firmware compute ABI needed for M4. The previous session stopped at this function.
+2. **M1, read-only on Linux:** snapshot the LLB-written PMGR pages and `+0x2300c`, the same way as
+   `gpu-pmgr-clock-wide`. Compare with J81's notes.
+3. **M1, static:** `0x66f47a0` and `0x66f2040`; and AppleT7000PMGR `initDriver`/`setPerfState`
+   (`0x670b000`–`0x670d3e0`).
+4. **M2:** compare the store kernel instruction by instruction with the A10's
+   `applegpu_g9p`/`metal-tt` output.
+5. **Do not write PMGR page 5 or any voltage by hand** until the sequence is known.
+
+## Tools and data
+
+- **Kernelcache:** `~/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2`.
+- **ADT:** `~/Projects/j96-touch-20261030/private/j96-adt-20261030.bin`.
+- **Helpers in `gpu/tools/`:** `kc.py` (segments, VA/file offset), `dis.py KC START END TMPDIR`
+  (llvm-objdump), `adt.py`, `adt_pmgr_devices.py ADT tools/`. Full-kernel disassembly takes a few
+  minutes; redo it in the session scratchpad.
+- **Kext ranges (`__TEXT_EXEC`):** IOAcceleratorFamily2 `0x664e000`–`0x667d30c`; AGXG4P
+  `0x667e000`–`0x66c3370`; ApplePMGR `0x66d6000`–`0x670aa4c`; AppleT7000PMGR
+  `0x670b000`–`0x670d3e0`.
+- **Captures (Apple data, never commit):** `~/Projects/j96-omarchy/private/gpu-capture-20261116/`
+  (full mode, 3 kernels, pre/post GPU regions) and `gpu-capture-20261117-light{,2,3}/` (the submit
+  call and its pointer dumps).
+- **iOS tools:** `gpu/ios-capture/build/` holds the CI build of 17 Nov. CI uses the **Intel**
+  runner (`macos-15-intel`), because the arm64 runners were cancelled for capacity. Builds run on
+  every push to `a8-ios-capture`.
+  - `GPUCapture.app` must run as a foreground app: copy it to `/var/tmp/GPUCapture.app`, run
+    `/cores/binpack/usr/bin/uicache -p /var/tmp/GPUCapture.app`, and the user taps it. The
+    entitlements include AGXG4P's command-queue user clients.
+  - Full mode writes to `/var/mobile/gpu-capture`. If `/var/mobile/gpu-capture-light` exists, it
+    runs light mode instead (IOConnect payloads plus pointer dumps) into
+    `/var/mobile/gpu-capture-light-out`.
+  - Pull results by packing on the iPad (`tar` plus `zstd -19`), then `xxd -p` over telnet; see
+    the snippet history in `M2-IOS-CAPTURE.md`.
+  - `kprobe regions` is safe (map queries only). **Any kernel read of an unmapped address panics
+    the iPad.**
 
 ## Boot recipes
 
 - **Linux:** `cd ~/Projects/j96-omarchy && ./j96-boot`.
-  - Serial: `/dev/ttyACM0`.
-  - Helpers in `gpu/tools/serial/`:
-    - `run.py SECS` runs stdin as one command.
-    - `push.py SRC DST` writes `DST.b64`; then `base64 -d` it.
-    - `stream.py TOKEN SECS LOG` runs a probe token and streams its lines.
-  - Before a token: `systemctl stop getty@tty1; chvt 1; printf "\033[9;0]" > /dev/tty1`.
-  - Then `echo 201000000.gpu-probe > /sys/bus/platform/drivers/apple-j96-gpuprobe/unbind;
-    insmod /run/apple-j96-gpubridge.ko`.
-  - Each token runs once per module load.
-- **iPadOS jailbreak (palera1n):**
-  1. Enter DFU by hand: Home + Power for 8 s, release Power, keep Home for 8–10 s; the screen stays
-     black. beta3's own DFU timer gets the timing wrong.
-  2. Then: `cd ~/Projects/j96-pongo-probe-20261030 && sudo env -i PATH=/usr/bin:/bin LANG=C ./palera1n-beta3 --cli -l -T -d`.
-  - Rootless `-l` only. NEVER `-f`, `-c` or `-B`: the storage is repartitioned for Linux.
+  - Serial console: `/dev/ttyACM0`.
+  - Helpers in `gpu/tools/serial/`: `run.py SECS`, `push.py SRC DST` (then `base64 -d`), and
+    `stream.py TOKEN SECS LOG`.
+  - Before a probe token: `systemctl stop getty@tty1; chvt 1; printf "\033[9;0]" > /dev/tty1`.
+    Then unbind `201000000.gpu-probe` from `apple-j96-gpuprobe` and `insmod
+    /run/apple-j96-gpubridge.ko`.
+  - Each token runs once per load. Afterwards, rmmod, rebind, and `systemctl start getty@tty1`.
+- **Jailbroken iPadOS (palera1n):**
+  1. Enter DFU by hand: Home + Power for 8 s, release Power, keep holding Home for 8–10 s. The
+     screen stays black.
+  2. Then: `cd ~/Projects/j96-pongo-probe-20261030 && sudo env -i PATH=/usr/bin:/bin LANG=C
+     ./palera1n-beta3 --cli -l -T -d`.
+  - Rootless `-l` only. **Never `-f`, `-c` or `-B`**: the storage is repartitioned for Linux.
   - Pitfalls:
-    - palera1n v2.4 on PATH does not work on this iPad, and it switches off auto-boot (stuck in
-      recovery; fix with `sudo palera1n -n`).
-    - Without sudo, palera1n cannot see recovery or DFU.
-    - Without `--cli`, beta3 opens a TUI, and under `env -i` the TUI dies for lack of TERM.
-  - Once USB shows `05ac:12ab`, use `gpu/ios-capture/tsession.py run '...'` / `push` / `kprobe`.
-    It is telnet through iproxy; there is no `/bin/sh` on rootless 15.x, so `session.py`'s SSH fails.
-- **Panic and reset reports** (normal iPadOS, unlocked):
-  `bash ~/Projects/j96-pongo-probe-20261030/collect-ios-reports.sh`, output in
-  `ios-reports-*/panic/`. The 16 Nov panic report had not appeared by 07:25.
+    - palera1n v2.4 on PATH does not work on this iPad and switches off auto-boot (fix with
+      `sudo palera1n -n`).
+    - It needs sudo.
+    - Without `--cli`, beta3 opens a TUI.
+  - Use `gpu/ios-capture/tsession.py run '...'` / `push` / `kprobe regions`. This is telnet over
+    iproxy; rootless 15.x has no `/bin/sh` for SSH.
+- **Panic reports** (normal iPadOS, unlocked):
+  `bash ~/Projects/j96-pongo-probe-20261030/collect-ios-reports.sh`.
 
-## Safety rules (unchanged)
+## Rules
 
-- No RGX access while the clock question is open (it freezes the SoC).
-- No AIC SW_SET/CLR writes, no PMGR perf, voltage or other-domain writes.
-- Apple data (dumps, panic logs, firmware, shaders) stays out of all repositories.
-- Hardware steps only with the user present. A freeze is recovered by DFU boot.
+- No RGX access under Linux while the clock question is open; it freezes the SoC.
+- No AIC SW_SET/CLR writes, and no PMGR perf, voltage or other-domain writes.
+- Apple data (dumps, captures, panic logs, firmware) stays in `private/`, never in a repository.
+  Notes describe patterns, not dumps.
+- Hardware steps only with the user present; a freeze is recovered by a DFU boot.
+- Ask before pushing, and before any upstream PR.
+  - Orchard's `docs/compatibility.md` is generated from `devices/j96/device.toml`. Propose updates
+    when a J96 feature changes state.
+  - PR OrchardLinux/orchard#155 (J96 feature states) is open.
+  - Orchard's CHANGELOG lines need the user's approval of the exact text.
