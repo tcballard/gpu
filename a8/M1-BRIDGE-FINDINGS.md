@@ -464,3 +464,55 @@ intact, so the missing step is not lost bootloader state. The one exception is p
 the GFX PLL page itself: it is cleared somewhere between the Pongo shell and Linux userspace (m1n1,
 early Linux, or a hardware side effect of a domain change such as AMP auto-gating). Whether iPadOS
 still has it set when AGXG4P powers GFX is the open question.
+
+## Data-driven page-5 writers: static check, 17 Nov (READ, single analyst, not re-checked)
+
+- **ADT:** no property in any node holds a page-5 offset (0x5000..0x50ff, or the PA). The hits
+  are device-name bytes, GPIO pin codes and the `nco` size field.
+- **`0x66f47a0`:** a recursive bool predicate on the device entry (flags & 0x82, a `+0x1b0` config
+  mode with a per-device record, or any parent). It makes no register writes and returns 0 for GFX,
+  so **`0x66f2040` is never reached for GFX**.
+- **`0x66f2040`:** waits on `+0x1b4`, or loops reading region 7 (reg[7], 0x207e00000) with 30 s/1 s
+  deadlines. No writes.
+- **AppleT7000PMGR:** every region-0 write has a literal or bounded offset; none is in page 5 or
+  `+0x1c000..+0x1c3ff`. `setPerfState` (`0x670c0a8`) handles SOC (`+0x1a000`) and CPU (region 8)
+  only, and panics for any other domain. `initDriver` (`0x670b568`) makes no writes.
+  - Side note: vt+0x5c8 (`0x670b72c`) sets bit 30 of `+0x1008` and `+0x4008` (pages 1 and 4 +0x8),
+    not page 5.
+  - `configVideoClock` writes page 2 and `+0x10208`/`+0x10054`.
+- Correction to 16 Nov: the `0x670d338` (id, offset) calls fill a register-dump table at `+0x2310`;
+  they do not register mappings.
+- ADT `perf-regs` = (reg 0, `+0x28000`, 0x29 entries); `perf-domains` = SOC and CPU only.
+
+**Not covered:** `ApplePMGR::start` and `ApplePMGR::initDriver` bodies, the superclass methods that
+T7000 tail-calls (vt+0x5d0, +0x5d8, +0x6c8), and other kexts.
+
+## Page 5 +0x1c bit 27: when does it clear? 17 Nov (READ on hardware)
+
+A read-only `early_initcall` in the built-in `apple-j96-gpuprobe` (kernel in `dev-image-early/`)
+read page 5 at 0.019 s, before secondary CPUs and before any platform driver probed. Same boot,
+`gpu-pmgr-handoff-snap` at 112 s. Logs: `private/handoff-snap-20261117-early-103123/`.
+
+| Point | page 5 +0x1c | AMP ps |
+|---|---|---|
+| Pongo shell (morning boot) | 0x0c040000 | 0x0f0000ff |
+| Linux 0.019 s (early_initcall) | 0x0c040000 | 0x0f0000ff |
+| Linux 112 s | 0x04040000 | (auto, gated) |
+
+So m1n1 and the Pongo-to-Linux handoff do not clear bit 27; something during the Linux boot does.
+At 0.019 s `ps_cpu1` already reads 0x1f0 (on before SMP bring-up). Next: a watcher in the same
+driver that prints page 5 +0x1c and the CPU1/MCC/MCU/AMP/GFX ps words at each initcall level,
+after every platform-bus bind, and every 10 ms for 180 s.
+
+**Watcher result, same day (supersedes the bit-27 lead above).** A second boot with a read-only
+watcher (page 5 +0x1c and the CPU1/MCC/MCU/AMP/GFX ps words at every initcall level, after every
+platform-bus bind, and every 10 ms; logs `private/handoff-snap-20261117-watch-110040/`):
+1614 samples over 90 s, 1444 changes. **Bit 27 toggles continuously from the first read onward**
+(0x04040000 <-> 0x0c040000, no other value), already before any driver ran. In the early read of this
+boot it was clear; on the previous boot it was set. During back-to-back power-domain binds (~26 µs
+apart) it alternates almost every sample; 10 ms polls catch irregular set periods.
+
+So the Pongo-vs-Linux "difference" was a single sample of a live status bit. **Step 1 result
+stands without exception: Linux receives the same pre-kernel PMGR state as the Pongo shell.**
+Side observation (INFERRED): on idle pages 0, 2, 3 bit 27 is steady at 1; only page 5 flickers,
+which suggests the GFX PLL page is actively doing something (handshake or retry) while idle.

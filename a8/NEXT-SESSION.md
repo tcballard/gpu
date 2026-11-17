@@ -62,20 +62,24 @@ value instead of a guess.
      `probe/apple-j96-gpubridge.c`, built like `gpu-pmgr-clock-wide`.
    - **They differ** → something between Pongo and Linux undoes setup: that is the lead.
      **They match** → the missing step happens inside the running iPadOS kernel: go to step 2.
-2. **Capture the working state under iPadOS with a "planned panic" (decisive; 2–3 sessions).**
-   J81's proven method on the A8X, which needs no kernel slide and no kernel-read tool.
-   - A PongoOS-side patch to the iPadOS kernel (Pongo module / KPF) that, **right after AGXG4P's
-     state-1 poll in its probe** (`0x6695a3c`–`0x6695a48`, M0 section 3.1), reads a list of
-     registers and panics with their values in the panic string.
-   - Collect the report with `bash ~/Projects/j96-pongo-probe-20261030/collect-ios-reports.sh`
-     (normal iPadOS, unlocked). Panic logs are Apple data: keep them in `private/`.
-   - Dump wide: all six clock pages in full, the speed table and control words, the LLB pages,
+2. **Ask the J81 author for their capture tool. Do not build one here.** (Revised later on
+   17 Nov.) The capture itself is still the measurement: GPU clock registers at the point
+   where AGXG4P powers the GPU, so the working iPadOS values can be compared with Linux.
+   A session that day read only the two public repos below. It stopped when the work turned
+   to applying a change to the iPadOS kernel at boot. Nothing was built or written, and that
+   approach stays closed.
+   - The tool is not in the public repo. The write-ups place the payload in their private
+     artifacts (`artifacts/live/private/j81-ios-agx-postpower-panic/`). Ask mattonik for it.
+   - Write-ups worth sending with that ask, both in the ipad-nixos checkout:
+     `research/probes/j81-agx-postpower-panic/README.md` and
+     `research/2026-11-16-j81-agx-postpower-page5-result.md`.
+   - Once the tool is in hand, dump wide at AGXG4P's state-1 poll (`0x6695a3c`–`0x6695a48`,
+     M0 section 3.1): all six clock pages, the speed table and control words, the LLB pages,
      `0x2300c`, all power-state registers, and the clock-mux area around `pmgr+0x10000`.
-   - Take the identical dump on Linux at the identical point (after GPC 1, before any RGX
-     access), then diff. Whatever iPadOS has set and Linux has not is the candidate fix.
-   - Study J81's notes first (OrchardLinux/gpu `a8x/README.md`, mattonik/ipad-nixos `research/`
-     "planned-panic series", `boot/pongo_gpu_split.py`). This is kernel patching, but on a
-     recoverable jailbreak boot.
+     Take the identical dump on Linux after GPC 1, before any RGX access, then diff.
+   - Panic logs are Apple data. Collect them with
+     `bash ~/Projects/j96-pongo-probe-20261030/collect-ios-reports.sh` (normal iPadOS,
+     unlocked) and keep them in `private/`.
 3. **Cheap static checks alongside:** any kext other than PMGR that touches GPU-related hardware
    before AGXG4P's probe; the memory controller is one example (the sgx node's unexplained `gfx-qos`
    property). Also the two conditional ApplePMGR functions (`0x66f47a0`, `0x66f2040`) and
@@ -96,6 +100,11 @@ at that point, widen the dump to the memory controller, the fabric and the PMU.
 
 ## Tools and data
 
+- **Reference checkouts (17 Nov, read only):**
+  `~/Projects/j96-omarchy/downloads/ext-20261117/ipad-nixos/` is mattonik/ipad-nixos `main` at
+  `0f42b65` (16 Nov 2026, tracking origin). `…/palera1n-src/` is palera1n `v3.0.0-beta.3` at
+  `42d6506` (detached tag checkout). `src/pongo_helper.c` (`send_full_pongo_jailbreak`) is the
+  boot command sequence.
 - **Kernelcache:** `~/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2`.
 - **ADT:** `~/Projects/j96-touch-20261030/private/j96-adt-20261030.bin`.
 - **Helpers in `gpu/tools/`:** `kc.py` (segments, VA/file offset), `dis.py KC START END TMPDIR`

@@ -1,0 +1,127 @@
+--- /tmp/claude-1000/-home-tcballard/9d353325-863e-47af-ab58-a70e632904eb/scratchpad/apple-j96-gpuprobe.c.orig	2026-11-17 10:11:04.907988980 +0000
++++ /home/tcballard/Projects/iomarchy-j96-tNPWSDe4/build/linux-src-touchbus/drivers/misc/apple-j96-gpuprobe.c	2026-11-17 10:37:28.133970491 +0000
+@@ -344,3 +344,124 @@
+ module_platform_driver(j96gp_driver);
+ MODULE_DESCRIPTION("J96 GPU power and identity bring-up probe (read-only identity, gated)");
+ MODULE_LICENSE("GPL");
++
++/*
++ * J96 early PMGR read and bit-27 watcher (17 Nov 2026, M1 route option 1): read-only.
++ * PMGR clock page 5 +0x1c bit 27 is set at the Pongo shell and at Linux start, and clear in
++ * userspace. To find what clears it, keep one non-posted PMGR mapping from early_initcall and
++ * read a few words (page 5 +0x1c and the ps registers of CPU1, MCC, MCU, AMP, GFX):
++ *   - in full at early_initcall (before secondary CPUs and before any platform driver probes);
++ *   - at every later initcall level;
++ *   - after every platform-bus driver bind/unbind (bus notifier), naming the device;
++ *   - every 10 ms for the first 180 s (delayed work), so a change that is not tied to a bind is
++ *     still timed.
++ * Lines are printed only when a watched word changes (plus one per initcall level). All words
++ * were read safely on this hardware before. No writes.
++ */
++#include <linux/workqueue.h>
++#include <linux/jiffies.h>
++
++static void __iomem *j96gp_wpmgr;
++static DEFINE_MUTEX(j96gp_wlock);
++static const u32 j96gp_woff[] = { 0x501c, 0x20008, 0x20230, 0x20238, 0x20240, 0x20320 };
++static const char *const j96gp_wname[] = { "p5_1c", "cpu1", "mcc", "mcu", "amp", "gfx" };
++static u32 j96gp_wlast[ARRAY_SIZE(j96gp_woff)];
++
++static void j96gp_watch(const char *where, const char *who, bool always)
++{
++	u32 v[ARRAY_SIZE(j96gp_woff)];
++	char line[200];
++	int i, n = 0;
++	bool changed = false;
++
++	if (!j96gp_wpmgr)
++		return;
++	mutex_lock(&j96gp_wlock);
++	for (i = 0; i < ARRAY_SIZE(j96gp_woff); i++) {
++		v[i] = readl(j96gp_wpmgr + j96gp_woff[i]);
++		if (v[i] != j96gp_wlast[i])
++			changed = true;
++	}
++	if (changed || always) {
++		for (i = 0; i < ARRAY_SIZE(j96gp_woff); i++)
++			n += scnprintf(line + n, sizeof(line) - n, " %s=%08x%s", j96gp_wname[i], v[i],
++				       v[i] != j96gp_wlast[i] ? "*" : "");
++		pr_info("J96GB_WATCH %s%s%s:%s\n", where, who ? " " : "", who ? who : "", line);
++		memcpy(j96gp_wlast, v, sizeof(v));
++	}
++	mutex_unlock(&j96gp_wlock);
++}
++
++static int j96gp_watch_bus(struct notifier_block *nb, unsigned long action, void *data)
++{
++	struct device *dev = data;
++
++	if (action == BUS_NOTIFY_BOUND_DRIVER)
++		j96gp_watch("bound", dev_name(dev), false);
++	else if (action == BUS_NOTIFY_UNBOUND_DRIVER)
++		j96gp_watch("unbound", dev_name(dev), false);
++	else if (action == BUS_NOTIFY_DRIVER_NOT_BOUND)
++		j96gp_watch("not-bound", dev_name(dev), false);
++	return NOTIFY_DONE;
++}
++static struct notifier_block j96gp_watch_nb = { .notifier_call = j96gp_watch_bus };
++
++static unsigned long j96gp_wend;
++static void j96gp_watch_poll(struct work_struct *w);
++static DECLARE_DELAYED_WORK(j96gp_wwork, j96gp_watch_poll);
++static void j96gp_watch_poll(struct work_struct *w)
++{
++	j96gp_watch("poll", NULL, false);
++	if (time_before(jiffies, j96gp_wend))
++		schedule_delayed_work(&j96gp_wwork, msecs_to_jiffies(10));
++	else
++		j96gp_watch("poll-end", NULL, true);
++}
++
++static int __init j96gp_early_pmgr(void)
++{
++	static const u32 extra[] = { 0x001c, 0x101c, 0x201c, 0x301c, 0x401c, 0x1c200, 0x1c300,
++				     0x20008, 0x20240, 0x20320 };
++	char line[200];
++	int i, n = 0;
++
++	if (!of_machine_is_compatible("apple,j96"))
++		return 0;
++	j96gp_wpmgr = ioremap_np(0x20e000000ULL, 0x24000);
++	if (!j96gp_wpmgr)
++		return 0;
++	for (i = 0; i < 16; i += 4)
++		pr_info("J96GB_EARLY page5 +0x%02x: %08x %08x %08x %08x\n", i * 4,
++			readl(j96gp_wpmgr + 0x5000 + i * 4), readl(j96gp_wpmgr + 0x5004 + i * 4),
++			readl(j96gp_wpmgr + 0x5008 + i * 4), readl(j96gp_wpmgr + 0x500c + i * 4));
++	for (i = 0; i < ARRAY_SIZE(extra); i++)
++		n += scnprintf(line + n, sizeof(line) - n, " %05x=%08x", extra[i],
++			       readl(j96gp_wpmgr + extra[i]));
++	pr_info("J96GB_EARLY%s\n", line);
++	j96gp_watch("early", NULL, true);
++	return 0;
++}
++early_initcall(j96gp_early_pmgr);
++
++static int __init j96gp_watch_core(void)
++{
++	j96gp_watch("core_initcall", NULL, true);
++	if (j96gp_wpmgr) {
++		bus_register_notifier(&platform_bus_type, &j96gp_watch_nb);
++		j96gp_wend = jiffies + msecs_to_jiffies(180000);
++		schedule_delayed_work(&j96gp_wwork, msecs_to_jiffies(10));
++	}
++	return 0;
++}
++core_initcall(j96gp_watch_core);
++
++#define J96GP_WATCH_LEVEL(fn, lvl)						\
++static int __init fn(void) { j96gp_watch(#lvl, NULL, true); return 0; }	\
++lvl(fn)
++J96GP_WATCH_LEVEL(j96gp_watch_postcore, postcore_initcall);
++J96GP_WATCH_LEVEL(j96gp_watch_arch, arch_initcall);
++J96GP_WATCH_LEVEL(j96gp_watch_subsys, subsys_initcall);
++J96GP_WATCH_LEVEL(j96gp_watch_fs, fs_initcall);
++J96GP_WATCH_LEVEL(j96gp_watch_device, device_initcall_sync);
++J96GP_WATCH_LEVEL(j96gp_watch_late, late_initcall);
++J96GP_WATCH_LEVEL(j96gp_watch_late_sync, late_initcall_sync);
