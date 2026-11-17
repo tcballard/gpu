@@ -65,6 +65,9 @@ static void dump_tree(NSString *prefix, uintptr_t addr, vm_size_t len, int depth
 static void dump_struct_ptrs(int n, const char *when, const void *sin, size_t nsin) {
     if (!gHookDir || !sin || nsin < 8)
         return;
+    // Record what is being dumped first: the call's own log line comes only after the call.
+    logf_(@"call %03d %s: struct_in %zu bytes saved as call_%03d_%s_in.bin", n, when, nsin, n, when);
+    save([NSString stringWithFormat:@"call_%03d_%s_in.bin", n, when], sin, nsin);
     int budget = 64;
     const uint64_t *w = sin;
     for (size_t i = 0; i < nsin / 8 && i < 64; i++)
@@ -75,6 +78,8 @@ static void dump_struct_ptrs(int n, const char *when, const void *sin, size_t ns
 static kern_return_t hook_call(mach_port_t c, uint32_t sel, const uint64_t *in, uint32_t nin,
                                const void *sin, size_t nsin, uint64_t *out, uint32_t *nout,
                                void *sout, size_t *nsout) {
+    if (gHookDir)
+        logf_(@"call %03d sync entry conn 0x%x sel %u nin %u struct_in %zu", gCallNo, c, sel, nin, nsin);
     dump_struct_ptrs(gCallNo, "pre", sin, nsin);
     kern_return_t kr = real_call(c, sel, in, nin, sin, nsin, out, nout, sout, nsout);
     dump_struct_ptrs(gCallNo, "post", sin, nsin);
@@ -86,6 +91,8 @@ static kern_return_t hook_async(mach_port_t c, uint32_t sel, mach_port_t wake, u
                                 uint32_t nref, const uint64_t *in, uint32_t nin, const void *sin,
                                 size_t nsin, uint64_t *out, uint32_t *nout, void *sout,
                                 size_t *nsout) {
+    if (gHookDir)
+        logf_(@"call %03d async entry conn 0x%x sel %u nin %u struct_in %zu", gCallNo, c, sel, nin, nsin);
     dump_struct_ptrs(gCallNo, "pre", sin, nsin);
     kern_return_t kr = real_async(c, sel, wake, ref, nref, in, nin, sin, nsin, out, nout, sout, nsout);
     dump_struct_ptrs(gCallNo, "post", sin, nsin);
@@ -104,6 +111,10 @@ static uc_trap_t real_uc_trap;
 static void dump_tree(NSString *prefix, uintptr_t addr, vm_size_t len, int depth, int *budget) {
     static uint8_t buf[0x10000];
     vm_size_t got = 0;
+    // Skip the dyld shared cache (classes, selectors: not submitted data); it used the whole
+    // budget in the first A8 run.
+    if (addr >= 0x180000000 && addr < 0x280000000)
+        return;
     if (*budget <= 0 || addr < 0x100000000 || addr >= 0x1000000000 ||
         vm_read_overwrite(mach_task_self(), addr, len, (vm_address_t)buf, &got) != KERN_SUCCESS)
         return;
