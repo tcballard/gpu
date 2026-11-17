@@ -172,10 +172,51 @@ u64 0x2_80359620}` (the u64 values are `0x210` apart).
 - So the kernel side to trace is: selector 1 on the command queue, then how it reads the
   segment list from shared memory, then the CL ring entry.
 
+## Kernel-side submit path, static (17 Nov; READ, single analyst)
+
+iPadOS 15.8.3 kernelcache. Kexts: IOAcceleratorFamily2 (`__TEXT_EXEC 0x664e000–0x667d30c`) and
+AGXG4P (`0x667e000–0x66c3370`).
+
+1. **Method table.** IOAcceleratorFamily2 `__DATA_CONST 0x6f2e7b0`, 6 entries. Selector 1 =
+   `0x66738b8`, 0 scalars, variable struct.
+2. **Selector 1 (`0x66738b8`).** It requires `(size − 8) % 24 == 0` and `(size − 8) / 24 ==
+   header[1]`, then calls `0x6674590(queue, struct)`. The struct is a header `{u32 0, u32 count}`
+   plus `count` entries `{u32 a, u32 b, u64 tag0, u64 tag1}`. Our capture: `a = 2, b = 1`.
+3. **`0x6674590`** locks, then for each entry calls `0x6674994(queue, a, b, tag0, tag1)`, with a
+   wait through vt `+0x680` and kdebug points `0x85020080/84`.
+4. **`0x6674994`** creates a command-buffer object (device vt `+0x5c8`, kept at
+   `[queue+0x608]`), initialises it with `[queue+0x580]` and `tag1` (vt `+0x88`), calls
+   **`0x66764a4(queue, a, b)`**, and queues completion events with `tag0` (`0x665c128`). So the
+   tags are completion tags, as the capture suggested.
+5. **`0x66764a4`** resolves `a` and `b` as **shared-memory IDs** in the queue's namespace
+   (`0x6665c58` on `[queue+0x5b8]`; a missing ID gives status 9). It takes each buffer's base and
+   length, marks buffer `b` busy (`[+0x70] = 1`), and **walks a segment list in buffer `b`**.
+   Each record's word `+0xc` holds bit 31 = last, bit 30 = flag, bits 29:0 = size.
+   - **Type 0, segment:** vt `+0x658(queue, a, b)`.
+   - **Type 1, range list:** `count` at `+0x8`, `(start, end)` u32 pairs from `+0x10`, each
+     checked against buffer `a`'s length, then vt `+0x670(queue, base_a + start, base_a + end)`.
+   - **Type 2:** end of list.
+
+   On J96 buffer `b` (ID 1) is the segment-list block seen at CPU `0x105950000`, and buffer `a`
+   (ID 2) holds the command data (INFERRED from the captures).
+6. **AGX command queue.** The vtable is `0x6f33ee8`; the base IOAccelCommandQueue2 vtable is
+   `0x6f2e850`, reached through GOT `0x6f31fb0`. AGXG4P overrides:
+   - `+0x668` → `0x66931b8`: wraps the base `0x667554c` in a firmware busy reference
+     (FW vt `+0x138(1, [queue+0x8b8])` … `+0x138(0, −1)`);
+   - `+0x670` → `0x6693234`: the range submit (calls the base `+0x670` first). **Not read
+     further.**
+
+   Slots `+0x5c8`, `+0x600`, `+0x658`, `+0x680` and `+0x688` are the base's.
+7. **Below that** (already known): CL kick `0x66a33fc` → ring writer `0x669cb30` (20-byte entry
+   `{2, fw-VA of [queue+0x120], arg}` at `[FW+0x300]`) → `MTS_SCHEDULE = 0x12`.
+
+**Open:** how `0x6693234` turns a command-buffer range (the CDM stream) into the firmware queue
+block at `[queue+0x120]` and the ring entry's argument. That is the A8 firmware's compute ABI
+(M4).
+
 ## Next
 
 1. Compare the store kernel with the A10 store_marker capture instruction by instruction.
-2. Decode `k0` (`0x2106` against the A10's `0x2103`) and record 0's fields; then follow the CL
-   queue block `[queue+0x120]` to the stream address. The light-mode app (flag file
-   `/var/mobile/gpu-capture-light`, built 17 Nov) records the IOConnect payloads.
+2. Continue the static trace at AGXG4P `0x6693234` (range submit) to the queue block
+   `[queue+0x120]` and the CL ring entry. (`k0` is decoded above.)
 3. The kernel slide (for the PMGR/Fender read) still needs another source.

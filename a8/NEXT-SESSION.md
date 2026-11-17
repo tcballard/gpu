@@ -61,6 +61,19 @@ last: "PMGR clock snapshots, 12 and 16 Nov"), `m1-clock-wide-20261116.log`, `pro
 - **New static target:** AppleT7000PMGR `initDriver` / `setPerfState`
   (`__TEXT_EXEC 0x670b000-0x670d3e0`).
 
+## Update, 17 Nov
+
+- **M2 is largely done** (`M2-IOS-CAPTURE.md`): compute jobs ran under iPadOS. The USC, PDS and
+  binding formats match the A10; the CDM records are stock Rogue (7 words). The submit is selector
+  1 with shared-memory IDs and completion tags. The kernel path is traced down to AGXG4P's
+  command-queue overrides (`0x66931b8`, `0x6693234`).
+- **Resume the static trace at `0x6693234`** (range submit to the firmware queue block). The
+  previous session stopped there.
+- Captures are in `~/Projects/j96-omarchy/private/gpu-capture-2026111{6,7}*` (never commit them).
+  `GPUCapture.app` (rebuilt 17 Nov) runs light mode when `/var/mobile/gpu-capture-light` exists.
+- **M1 (the GFX PLL) is still the gate** for everything on Linux.
+- Orchard PR #155 (J96 feature states) is open.
+
 ## Next steps, in order
 
 1. **Rebuild kprobe.** Either copy `ios-capture/kprobe.c` into the fork's `tools/a8/ios-capture/`,
