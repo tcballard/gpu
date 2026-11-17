@@ -22,7 +22,11 @@
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        capture(@"/var/mobile/gpu-capture");
+        // Light mode (IOConnect payloads to iocalls/, GPU regions only) when this flag file exists:
+        // apps get no arguments. Touch it over telnet before tapping the icon.
+        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/gpu-capture-light"])
+            gLight = YES;
+        capture(gLight ? @"/var/mobile/gpu-capture-light-out" : @"/var/mobile/gpu-capture");
         text.text = gLog;
     });
     return YES;
