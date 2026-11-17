@@ -138,6 +138,40 @@ is a real format difference. Offsets are relative to the pipeline heap (the PDS/
   (ring control `[FW+0x2f8]`, write index +0x10, 8-bit). Then `dmb`, the Fender pre-kick, and
   `MTS_SCHEDULE = 0x12`. How the queue block references this stream is still open.
 
+## Light-mode capture: the submit call (17 Nov)
+
+GPUCapture.app in light mode (flag file `/var/mobile/gpu-capture-light`; one kernel, two dispatches
+in one command buffer). Both completed (`0x1357`). Saved privately in
+`~/Projects/j96-omarchy/private/gpu-capture-20261117-light/`.
+
+- **During commit there is exactly one IOConnect call:** connection `0xa113` (the command-queue
+  user client, INFERRED), selector 1, a 32-byte struct input, no output, `kr 0`. No traps.
+- **The payload is** `{u32 0, u32 1, u32 2, u32 1, u64 0x2_82014ea0, u64 0x2_820171b0}`. The two
+  u64 values are userspace heap pointers, so the kernel copies the command-buffer description in
+  from process memory. Light mode dumps no memory, so their targets were not saved.
+- The likely target is the segment-list-shaped block in shared memory (`0x105950000`:
+  `{0x10000, 0x120, count, …}`, which gets its count and the CDM terminate pointer at commit).
+  Static next step: AGXG4P / IOAcceleratorFamily's command-queue selector 1
+  (`IOAccelCommandQueue2` submit) to the CL ring entry above.
+
+### Pointer dumps of the submit struct (17 Nov, runs 2–3)
+
+The hook now logs at entry (`28b385e`) and dumps what the struct's pointer-looking words point to,
+skipping the dyld shared cache. Run 3 (`private/gpu-capture-20261117-light3/`):
+`call 000 sync entry conn 0xa21b sel 1 struct_in 32`, struct `{0, 1, 2, 1, u64 0x2_80359410,
+u64 0x2_80359620}` (the u64 values are `0x210` apart).
+
+- **The `+0x10` target is an Objective-C object**: nonpointer isa / shared-cache class, retain word
+  `0xc3000002`, a heap pointer. One level down there are two pthread mutex signatures
+  (`0x4d55545a`, "MUTZ"). No command data.
+- **Reading (INFERRED):** the two u64 values are opaque userspace tags (command-buffer objects
+  returned with completion), not data the kernel parses. The command data reaches the kernel
+  through the shared GPU memory decoded above: the segment-list block (`0x105950000`) and the CDM
+  stream (`0x1_002b0000`). The small integers `{0, 1, 2, 1}` are probably a count and
+  shared-memory IDs set up by earlier calls.
+- So the kernel side to trace is: selector 1 on the command queue, then how it reads the
+  segment list from shared memory, then the CL ring entry.
+
 ## Next
 
 1. Compare the store kernel with the A10 store_marker capture instruction by instruction.
