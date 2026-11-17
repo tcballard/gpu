@@ -42,18 +42,57 @@ ApplePMGR functions (`0x66f47a0`, `0x66f2040`). The iPadOS read of page 5 needs 
 - The segment-list format is decoded. The kernel path is traced down to AGXG4P's command-queue
   overrides: `+0x668` → `0x66931b8`, `+0x670` → `0x6693234`.
 
-## Next steps, in order
+## Next steps: the M1 route (agreed 17 Nov)
 
-1. **Static: resume at AGXG4P `0x6693234`** (the command-buffer range submit). Follow it to the
-   firmware queue block `[queue+0x120]` and the CL ring entry (`0x669cb30`, kick `0x66a33fc`).
-   This is the firmware compute ABI needed for M4. The previous session stopped at this function.
-2. **M1, read-only on Linux:** snapshot the LLB-written PMGR pages and `+0x2300c`, the same way as
-   `gpu-pmgr-clock-wide`. Compare with J81's notes.
-3. **M1, static:** `0x66f47a0` and `0x66f2040`; and AppleT7000PMGR `initDriver`/`setPerfState`
-   (`0x670b000`–`0x670d3e0`).
-4. **M2:** compare the store kernel instruction by instruction with the A10's
-   `applegpu_g9p`/`metal-tt` output.
-5. **Do not write PMGR page 5 or any voltage by hand** until the sequence is known.
+The static PMGR route is exhausted. The way forward is a **measured diff of register state between
+a working iPadOS boot and a Linux boot, at the same point**, so the missing step shows up as a
+value instead of a guess.
+
+1. **Test the pre-kernel assumption (one session, read-only, low risk).** Everything assumes both
+   boot paths reach their kernel with identical hardware state, because both go through
+   checkm8 → PongoOS. That is unverified: J81's notes say their Linux path records no LLB/iBoot
+   handoff.
+   - Stop palera1n at the PongoOS shell (`-p` early exit, or j96-boot's Pongo stage, plus
+     pongoterm). J81 used Pongo's `peek`; check the command's exact form there.
+   - Read: PMGR clock pages 0–5 (`0x20e000000`–`0x20e00503c`), the GFX speed table and control words
+     (`0x20e01c000`–`0x20e01c3fc`), the LLB-written pages (`0x20e010000`–`0x20e0140bc`,
+     `0x20e00f208`–`0x20e00f21c`), `0x20e02300c`, and every power-state register
+     (`0x20e020000`–`0x20e021010`).
+   - Take the same snapshot early in Linux: a new read-only token in
+     `probe/apple-j96-gpubridge.c`, built like `gpu-pmgr-clock-wide`.
+   - **They differ** → something between Pongo and Linux undoes setup: that is the lead.
+     **They match** → the missing step happens inside the running iPadOS kernel: go to step 2.
+2. **Capture the working state under iPadOS with a "planned panic" (decisive; 2–3 sessions).**
+   J81's proven method on the A8X, which needs no kernel slide and no kernel-read tool.
+   - A PongoOS-side patch to the iPadOS kernel (Pongo module / KPF) that, **right after AGXG4P's
+     state-1 poll in its probe** (`0x6695a3c`–`0x6695a48`, M0 section 3.1), reads a list of
+     registers and panics with their values in the panic string.
+   - Collect the report with `bash ~/Projects/j96-pongo-probe-20261030/collect-ios-reports.sh`
+     (normal iPadOS, unlocked). Panic logs are Apple data: keep them in `private/`.
+   - Dump wide: all six clock pages in full, the speed table and control words, the LLB pages,
+     `0x2300c`, all power-state registers, and the clock-mux area around `pmgr+0x10000`.
+   - Take the identical dump on Linux at the identical point (after GPC 1, before any RGX
+     access), then diff. Whatever iPadOS has set and Linux has not is the candidate fix.
+   - Study J81's notes first (OrchardLinux/gpu `a8x/README.md`, mattonik/ipad-nixos `research/`
+     "planned-panic series", `boot/pongo_gpu_split.py`). This is kernel patching, but on a
+     recoverable jailbreak boot.
+3. **Cheap static checks alongside:** any kext other than PMGR that touches GPU-related hardware
+   before AGXG4P's probe; the memory controller is one example (the sgx node's unexplained `gfx-qos`
+   property). Also the two conditional ApplePMGR functions (`0x66f47a0`, `0x66f2040`) and
+   AppleT7000PMGR `initDriver`/`setPerfState` (`0x670b000`–`0x670d3e0`).
+4. **Do not write guessed values** to page 5, the speed table or any voltage. Without the real
+   sequence it is more likely to crash or stress the chip than to fix anything.
+
+If the diff shows a clear difference, M1 could fall within about a week of it. If the states match
+at that point, widen the dump to the memory controller, the fabric and the PMU.
+
+## Other work (when M1 is waiting)
+
+- **Static: resume at AGXG4P `0x6693234`** (the command-buffer range submit). Follow it to the
+  firmware queue block `[queue+0x120]` and the CL ring entry (`0x669cb30`, kick `0x66a33fc`).
+  This is the firmware compute ABI for M4. The 17 Nov session stopped at this function.
+- **M2:** compare the store kernel instruction by instruction with the A10's
+  `applegpu_g9p`/`metal-tt` output.
 
 ## Tools and data
 
