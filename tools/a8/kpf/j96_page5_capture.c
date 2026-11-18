@@ -122,9 +122,9 @@ static bool target_ok(void) {
 
 static bool branch(uint32_t *from, uint32_t *to, bool link, uint32_t *out) {
     int64_t off = (int64_t)(to - from);  /* word difference == VA diff >> 2 */
-    if ((off & 3) || off < -0x8000000LL || off > 0x7fffffcLL)
+    if (off < -0x2000000LL || off > 0x1ffffffLL)  /* +/-128 MiB in words */
         return false;
-    *out = (link ? 0x94000000U : 0x14000000U) | ((uint32_t)(off >> 2) & 0x03ffffffU);
+    *out = (link ? 0x94000000U : 0x14000000U) | ((uint32_t)off & 0x03ffffffU);
     return true;
 }
 

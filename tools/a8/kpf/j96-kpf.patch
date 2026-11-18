@@ -1,6 +1,6 @@
 diff --git i/checkra1n/kpf/j96_page5_capture.c w/checkra1n/kpf/j96_page5_capture.c
 new file mode 100644
-index 0000000..333d3d6
+index 0000000..f8cad55
 --- /dev/null
 +++ w/checkra1n/kpf/j96_page5_capture.c
 @@ -0,0 +1,178 @@
@@ -128,9 +128,9 @@ index 0000000..333d3d6
 +
 +static bool branch(uint32_t *from, uint32_t *to, bool link, uint32_t *out) {
 +    int64_t off = (int64_t)(to - from);  /* word difference == VA diff >> 2 */
-+    if ((off & 3) || off < -0x8000000LL || off > 0x7fffffcLL)
++    if (off < -0x2000000LL || off > 0x1ffffffLL)  /* +/-128 MiB in words */
 +        return false;
-+    *out = (link ? 0x94000000U : 0x14000000U) | ((uint32_t)(off >> 2) & 0x03ffffffU);
++    *out = (link ? 0x94000000U : 0x14000000U) | ((uint32_t)off & 0x03ffffffU);
 +    return true;
 +}
 +
