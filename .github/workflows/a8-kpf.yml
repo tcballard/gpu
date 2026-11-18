@@ -1,0 +1,38 @@
+# Builds the J96 (A8) page-5 KPF probe for palera1n --override-kpf.
+# Clones checkra1n/pongoOS at the pinned revision, applies the component patch,
+# builds checkra1n-kpf-pongo with Xcode's ld64, and uploads the Mach-O module.
+name: J96 KPF page-5 probe
+on:
+  workflow_dispatch:
+  push:
+    branches: ['a8-bringup']
+    paths: ['tools/a8/kpf/**', '.github/workflows/a8-kpf.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build KPF module
+        run: |
+          set -euxo pipefail
+          xcodebuild -version
+          # Base revision of the local PongoOS checkout (has checkra1n/kpf/).
+          PONGO_REV=ce17354ad7daa5e650be0709fb5de5afabe5c461
+          git clone --quiet https://github.com/checkra1n/pongoOS /tmp/pongoOS
+          cd /tmp/pongoOS
+          git checkout "$PONGO_REV"
+          git apply "$GITHUB_WORKSPACE/tools/a8/kpf/j96-kpf.patch"
+          git submodule update --init --recursive
+          make build/checkra1n-kpf-pongo -j"$(sysctl -n hw.ncpu)"
+          shasum -a 256 build/checkra1n-kpf-pongo
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: j96-kpf-page5
+          path: /tmp/pongoOS/build/checkra1n-kpf-pongo
+          retention-days: 14
+          if-no-files-found: error
