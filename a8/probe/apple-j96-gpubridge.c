@@ -731,6 +731,13 @@ static const struct {
 	/* Ranges the iOS host driver touches first; the firmware-only ones last. */
 	{ 0x0, 16 }, { 0x1000, 128 }, { 0x20000, 16 }, { 0x10000, 8 },
 	{ 0x2000, 16 }, { 0x3000, 16 }, { 0x4000, 16 },
+	/*
+	 * 17 Nov 2026: +0x2040..+0x20fc, never read on J96. On the A10 (Orchard a10/FENDER.md §18.2,
+	 * bringup/kernel.md §1.5) this page holds the IOP run bit (+0x2048) and +0x2050/+0x2054/
+	 * +0x2058, and +0x2058 changes at the GPC 1 request. Reads only; last, so a hang here comes
+	 * after every other range has been printed.
+	 */
+	{ 0x2040, 48 },
 };
 
 /* One scan: every range, eight registers per announce, printed as soon as they are read. */

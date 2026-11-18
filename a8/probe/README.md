@@ -173,3 +173,11 @@ must match it (both are checked by hand-run script, see the session notes).
 - Linux half: `../tools/linux-handoff-snap.sh` on that boot, before any other token.
 - Both logs go to `~/Projects/j96-omarchy/private/handoff-snap-*/`;
   `../tools/handoff_regs.py diff pongo.log linux.log` compares them.
+
+## `gpu-fender-scan` extended (17 Nov 2026)
+
+The scan now ends with Fender `+0x2040..+0x20fc` (48 words), never read on J96. On the A10
+(OrchardLinux/gpu `a10/FENDER.md` §18.2, `a10/bringup/kernel.md` §1.5) that page holds the IOP
+run bit (`+0x2048`) and `+0x2050`/`+0x2054`/`+0x2058`, and `+0x2058` changes at the GPC 1
+request. Same sequence and access envelope as before; the new range is read last, at both scans
+(A powered, B at GPC 1). Run with `../tools/linux-handoff-snap.sh DIR gpu-fender-scan`.

@@ -134,9 +134,9 @@ is a real format difference. Offsets are relative to the pipeline heap (the PDS/
   base. Record 0's data at `+0x28040` lies outside the 64 KiB pipeline heap, so the PDS data heap
   is larger or separate (INFERRED; base not yet pinned).
 - The kernel side then queues the CL work: `0x66a33fc` calls `0x669cb30`, which writes a 20-byte
-  CL ring entry `{2, fw-VA of the queue block [queue+0x120] (FW vt+0x1a8), arg}` at `[FW+0x300]`
-  (ring control `[FW+0x2f8]`, write index +0x10, 8-bit). Then `dmb`, the Fender pre-kick, and
-  `MTS_SCHEDULE = 0x12`. How the queue block references this stream is still open.
+  CL ring entry `{2, fw-VA of the AGXChannel block [channel+0x120] (FW vt+0x1a8), arg}` at
+  `[FW+0x300]` (ring control `[FW+0x2f8]`, write index +0x10, 8-bit). Then `dmb`, the Fender
+  pre-kick, and `MTS_SCHEDULE = 0x12`. The submit path does not fill that block; see below.
 
 ## Light-mode capture: the submit call (17 Nov)
 
@@ -203,20 +203,80 @@ AGXG4P (`0x667e000–0x66c3370`).
    `0x6f2e850`, reached through GOT `0x6f31fb0`. AGXG4P overrides:
    - `+0x668` → `0x66931b8`: wraps the base `0x667554c` in a firmware busy reference
      (FW vt `+0x138(1, [queue+0x8b8])` … `+0x138(0, −1)`);
-   - `+0x670` → `0x6693234`: the range submit (calls the base `+0x670` first). **Not read
-     further.**
+   - `+0x670` → `0x6693234`, read below.
+   - `+0x658` is the base stub `0x6675364`: it stores 0 at `[queue+0x620]` and returns. A type-0
+     segment submit does not copy the segment.
 
-   Slots `+0x5c8`, `+0x600`, `+0x658`, `+0x680` and `+0x688` are the base's.
-7. **Below that** (already known): CL kick `0x66a33fc` → ring writer `0x669cb30` (20-byte entry
-   `{2, fw-VA of [queue+0x120], arg}` at `[FW+0x300]`) → `MTS_SCHEDULE = 0x12`.
+   Slots `+0x5c8`, `+0x600`, `+0x680` and `+0x688` are the base's.
+7. **`0x6693234` (READ).** It calls the base `+0x670`, which is `ret` at `0x6674d7c`, so the
+   `(start, end)` range is dropped on the floor. It then compares `[queue+0x5a0]` with the cached
+   copy at `[queue+0x8b8]`. Equal means return. Otherwise it stores the new value at `+0x8b8` and
+   sets `[queue+0x8bc]` from `[queue+0x8c0]`, unless `[accel+0xe70]` bit 31 is set and the word at
+   `accel+0xfec + index*4` is 0, in which case the index comes from `[accel+0xff4]`. It calls
+   `[[accel+0x378] vt+0xe8](&queue+0x5c8)` and tail-calls `0x6693450`.
+   `0x6693450` walks three listener lists and calls each object's vt `+0x168(obj, state, index,
+   mode)`. The lists are count `+0x908` at `+0x6a8`, count `+0x90c` at `+0x6c8`, and count
+   `+0x910` at `+0x6e8`. `mode` is `[queue+0x5a4]` when `[queue+0x5a0] == 1`, and 2 otherwise.
+   The listeners are created by `0x6693570` (accel vt `+0x7f8`, then the new object's vt `+0x140`).
+   None of this reads the CDM range.
+8. **The block at `+0x120` belongs to `AGXChannel`, and it is allocated at init, not at submit.**
+   `AGXChannel::init` is `0x668d5f8` (type string at `0x57bb799`; failure text at `0x57bb76d` is
+   "failed to prepare AGXChannel"; callers `0x66a9d3c`, `0x66ae610`, `0x66aebdc`). It takes a slab slot from the firmware heap:
+   - Heap A: bitmaps `[FW+0x748]` / `[FW+0x750]`, slabs `[FW+0x708]`, stride `[FW+0x760]`,
+     per-slab count `[FW+0x720]`. Find-first-set picks the slot. `[channel+0x120]` is the CPU
+     mapping of that slot (`slab vt+0x88` plus the offset). `[channel+0x100]` is the slab's other
+     mapping (`[slab+0x18]` plus the same offset). `[channel+0xf0]` is the bit index.
+   - Heap B: bitmaps `[FW+0x868]` / `[FW+0x870]`, slabs `[FW+0x828]`, stride `[FW+0x880]`,
+     count `[FW+0x840]`. The slot's CPU mapping goes to `[channel+0x128]`, and that address plus
+     `0x60` to `[channel+0x130]`. The other mapping goes to `[channel+0x108]` and `+0x60` to
+     `[channel+0x110]`. `[channel+0xf4]` is its bit index.
+   The FW pointer is `[[channel+0x18]+0xdd8]`. That `[channel+0x18]` is the accelerator is
+   INFERRED from the init's type string, which takes an `AGXAccelerator *`.
+9. **Kick (READ).** `0x66872dc(owner, channel, arg)` loads the FW from `[owner+0xdd8]`, reads
+   `[channel+0x20]` and `channel vt+0x180()`, then calls FW vt `+0x150`. That slot is `0x66a33fc`
+   (FW vtable `0x6f354f8`). The ring writer `0x669cb30` writes `{2, fw-VA, arg}` where the fw-VA
+   is FW vt `+0x1a8` of `[channel+0x120]`. `arg` is the wrapper's third argument. It is not the
+   CDM pointer.
 
-**Open:** how `0x6693234` turns a command-buffer range (the CDM stream) into the firmware queue
-block at `[queue+0x120]` and the ring entry's argument. That is the A8 firmware's compute ABI
-(M4).
+10. **Three channel kinds (READ).** `[channel+0x154]` picks a 16-byte entry in the table at
+    `0x6f33c70`. The entry's function is the kick. Each factory calls `AGXChannel::init` and then
+    sets the type and a FW-relative pointer at `[channel+0x148]`:
+
+    | Type | Factory | `[channel+0x148]` | FW slot | Ring writer | Opcode | `MTS_SCHEDULE` | Ring control |
+    |---|---|---|---|---|---|---|---|
+    | 0 | `0x66aebc8` | `FW+0x10` | `+0x140` `0x66a304c` | `0x669c81c` | 0 | `0x10` | `[FW+0x2b8]` |
+    | 1 | `0x66a9d24` | `FW+0x80` | `+0x148` `0x66a3224` | `0x669c9a4` | 1 | `0x11` | `[FW+0x2d8]` |
+    | 2 | `0x66ae5fc` | `FW+0xf0` | `+0x150` `0x66a33fc` | `0x669cb30` | 2 | `0x12` | `[FW+0x2f8]` |
+
+    The kext names `AGX3DChannelG4P_B0` and `AGXTAChannelG4P_B0`. Which type number is which class
+    is not tied. Type 2 is the kick already documented (opcode 2, `MTS_SCHEDULE` `0x12`).
+11. **What the two blocks contain (READ, reset `0x668dbc4`).** Block A is `[channel+0x120]` (CPU)
+    and `[channel+0x100]` (the other mapping). Block B is `[channel+0x128]` and `[channel+0x108]`.
+    Reset zeroes both, then writes:
+    - Block A `+0x00`: fw-VA of block B. `+0x04`: fw-VA of block B `+0x60`. `+0x08`: fw-VA of
+      `[channel+0x138]`, which init stored from its `x7`.
+    - Block A `+0x14`: `[channel+0xf8]`, init's `w2` (`uint32_t` after the accelerator argument).
+      `+0x18`: `0xffffffff`.
+    - Block B `+0x50`: `[channel+0xfc]` (init's `w4` times 9). `+0x00`, `+0x10`, `+0x20`, `+0x30`
+      and `+0x40` are 0.
+    The firmware ring's second word is the fw-VA of block A, so the firmware finds block B through
+    block A's first word. No word written here is the shared-memory CDM pointer.
+12. **The ring `arg` (READ).** Submit is `0x6686df8(owner, channel, flag, ptr)`, reached from
+    `[[accel+0xd18] vt+0xe8]` at `0x667edb0`, `0x668e4a0` and `0x66bbba8`. The `arg` is the `u32`
+    at block B `+0x40`, read through `[channel+0x108]`. Reset stores 0 there, and the command
+    builder at `0x667e4e0` samples the same word into `[channel+0x178]`. No other kernel store
+    through the channel's block pointers writes `+0x40`, so after reset the live value is the
+    firmware's (INFERRED). When `flag`'s first byte is 0 the submit also appends `{arg, ptr}` as
+    a 16-byte record on the channel ring at `[channel+0x168]`, and it kicks only when that flag
+    is 0 and `[channel+0x158]` is 0. `ptr` is the caller's `[object+0x38]`. It is not buffer `a`.
+
+**Open:** block A points the firmware at block B, not at the CDM stream. The stream still stays
+in shared memory. Still unknown: where a submit writes buffer `a`'s address into block B, and
+what block B `+0x40` counts. That is the rest of the A8 firmware compute ABI (M4).
 
 ## Next
 
 1. Compare the store kernel with the A10 store_marker capture instruction by instruction.
-2. Continue the static trace at AGXG4P `0x6693234` (range submit) to the queue block
-   `[queue+0x120]` and the CL ring entry. (`k0` is decoded above.)
+2. Find the store of shared-memory buffer `a` into block B, and what block B `+0x40` counts.
+   The ring `arg` is that word. (`k0` is decoded above.)
 3. The kernel slide (for the PMGR/Fender read) still needs another source.

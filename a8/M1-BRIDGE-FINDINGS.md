@@ -516,3 +516,41 @@ So the Pongo-vs-Linux "difference" was a single sample of a live status bit. **S
 stands without exception: Linux receives the same pre-kernel PMGR state as the Pongo shell.**
 Side observation (INFERRED): on idle pages 0, 2, 3 bit 27 is steady at 1; only page 5 flickers,
 which suggests the GFX PLL page is actively doing something (handshake or retry) while idle.
+
+## ApplePMGR start-up and initDriver: static check, 17 Nov evening (READ, single analyst, not re-checked)
+
+- **Names corrected:** `0x66dc7a4` is `ApplePMGR::initDriver` (vt 0x598); `ApplePMGR::start` is
+  `0x66d61f8` (vt 0x2b0). T7000's super calls at vt+0x5d0/+0x5d8/+0x6c8 are really slots 0x5c0
+  (`0x66e8e10`), 0x5c8 (`0x66e9efc`) and 0x6b8 (`0x66eca4c`). The vtable address point is +0x10.
+- **Regions on T7000** (`0x670b488`): only region 0 = reg[0] (0x20e000000) and region 8 = reg[1]
+  (0x202220000) are mapped; bridges are mapped separately (`+0x2668`, reg[2+n]). Every other region
+  (1, 6, 7, 0xc, 0x14, 0x1e, 0x28, 0x33, 0x4e) is unmapped. This corrects "region 7 = reg[7]" above.
+- **Writers reachable from start/initDriver/the super methods:**
+  - ps registers (only for `pmgr-debug-always-on` boot-arg devices, or as a restore for slots
+    already at 0xf);
+  - bridge settings (the same code as the GFX power-on path, already replicated);
+  - a perf-regs statistics block at `+0x28000..~+0x283a0` (GFX not in it: flags 0, perf 0/0);
+  - CPU block (region 8), and boot-arg-gated paths.
+  - **None reaches page 5, `+0x1c000..`, or a GFX register.**
+- ApplePMGR has `readGFXClkGenReg`/`writeGFXClkGenReg`/`waitGFXClkGenReg` (`0x66edeac`/`ee0`/`f18`,
+  region 0x4e), but nothing calls them and region 0x4e is unmapped on T7000.
+- **No tunables:** J96 pmgr has no settings list beyond `bridge-settings-N`.
+- **SoC tuner** (`AppleT7000SOCTuner`, `pmgr/soc-tuner`, no reg): `device-set-0` = MEDIA, ISP,
+  DISP1, DISP-FB-ACTIVE, GFX. It picks an MCC config (0–3) and calls `function-dispidle_ctrl` (disp0)
+  and `function-mcc_ctrl` (AMCC memory-cache/DRAM config). It writes no PMGR or GFX clock state.
+- **Not covered:** the init of the cached ps state (`+0x19094`), callPlatformFunction handlers,
+  AMCC writes, AGXG4P/Fender non-PMGR paths, m1n1.
+
+## Fender +0x2040..+0x20fc on J96, 17 Nov evening (READ on hardware)
+
+Prompted by the A10 bring-up (OrchardLinux/gpu `a10/FENDER.md` §18.2: there Fender `+0x2048` is the
+GPU coprocessor run bit and `+0x2050..+0x2058` are live; `+0x2058` changes at GPC 1). Extended
+`gpu-fender-scan` (module `02fa7069…`) on a fresh normal boot; result 0, no freeze; log
+`private/fender-scan-20261117-193319/`.
+
+- **All 48 words read zero, both with `ps_gfx` on (scan A) and at GPC 1 (scan B, perf = 1).**
+- Every other scanned range is identical to the 10 Nov run (apart from the sequencer SRAM window).
+
+So J96's Fender has no A10-like IOP control or status words in that page, which fits the A8 having
+no `gfx-kf` coprocessor. This lead is closed. The A10 recipe (start the IOP, then
+`+0x1000 = 0x11`) is not portable as such.

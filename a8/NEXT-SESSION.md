@@ -92,9 +92,11 @@ at that point, widen the dump to the memory controller, the fabric and the PMU.
 
 ## Other work (when M1 is waiting)
 
-- **Static: resume at AGXG4P `0x6693234`** (the command-buffer range submit). Follow it to the
-  firmware queue block `[queue+0x120]` and the CL ring entry (`0x669cb30`, kick `0x66a33fc`).
-  This is the firmware compute ABI for M4. The 17 Nov session stopped at this function.
+- **Static, channel blocks decoded (17 Nov, later):** three kicks, types 0/1/2, opcodes 0/1/2,
+  `MTS_SCHEDULE` `0x10`/`0x11`/`0x12`. The ring's second word is the fw-VA of block A
+  (`[channel+0x120]`), and block A `+0x00` is the fw-VA of block B. The ring `arg` is block B
+  `+0x40`. Detail in `M2-IOS-CAPTURE.md`. Still open: where buffer `a` is written into block B,
+  and what `+0x40` counts.
 - **M2:** compare the store kernel instruction by instruction with the A10's
   `applegpu_g9p`/`metal-tt` output.
 
