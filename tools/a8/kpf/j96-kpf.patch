@@ -184,21 +184,24 @@ index 0000000..333d3d6
 +};
 diff --git i/checkra1n/kpf/j96_page5_shell.S w/checkra1n/kpf/j96_page5_shell.S
 new file mode 100644
-index 0000000..bb3c4aa
+index 0000000..dca0834
 --- /dev/null
 +++ w/checkra1n/kpf/j96_page5_shell.S
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,84 @@
 +/*
-+ * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) page-5 +0x4 capture.
-+ * Two-hook, read-only shellcode (J81 page5writer approach — no ml_io_map).
++ * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) FULL-STATE dump probe.
++ * Same two hooks as the single-word probe, but the read hook now captures 19
++ * PMGR words directly into x10..x28 and faults with far = 0xbeef.
 + *
-+ *   capture  replaces `blr x8` at unslid 0xfffffff0066e4294 (the PMGR ps-poll
-+ *            call in ApplePMGR's ps-register set). x20 = the PMGR object (this);
-+ *            it is stored into a buffer, then the original poll runs.
-+ *   read     replaces `mov w0,#0xa` at unslid 0xfffffff006695a44 (AGXG4P
-+ *            post-GPC-poll, before IODelay). It loads the saved PMGR object and
-+ *            calls [pmgr]->vt[0x980](pmgr, region=0, offset=0x5004, die=0),
-+ *            then deliberately faults so x0/far carry the page-5 +0x4 word.
++ * Direct MMIO read (no function call, so no register clobbering):
++ *   region-0 mapped base VA is at [pmgr + 0xa70]  (regionmap(0,0)->+0x18).
++ *
++ * Register -> value map (read from the panic report's x0..x28):
++ *   x10..x25 = PMGR clock page 5, words +0x00..+0x3c   (the GFX PLL page)
++ *   x26      = PMGR +0x1c200  (GFX perf-state control)
++ *   x27      = PMGR +0x1c300
++ *   x28      = PMGR +0x2300c
++ *   far      = 0xbeef  (dump captured)  /  0xdead  (capture hook never ran)
 + *
 + * READ-ONLY: no MMIO store.
 + */
@@ -216,28 +219,53 @@ index 0000000..bb3c4aa
 +    stp     x29, x30, [sp, #-16]!
 +    ldr     x16, _j96_page5_buffer
 +    str     x20, [x16]                  // buffer[0] = PMGR object
-+    blr     x8                          // run the original poll (x0 = result)
++    blr     x8                          // run the original poll
 +    ldp     x29, x30, [sp], #16
 +    ret
 +
 +// --- read hook (replaces `mov w0,#0xa` after the GPC busy poll) -------------
 +_j96_page5_read:
 +    ldr     x16, _j96_page5_buffer
-+    ldr     x16, [x16]                  // x16 = saved PMGR object
-+    cbz     x16, 1f                     // never captured -> sentinel fault
-+    ldr     x8, [x16]                   // vtable
-+    ldr     x8, [x8, #0x980]            // read(region, offset, die) slot
-+    mov     x0, x16                     // this = PMGR object
-+    mov     x1, #0                      // region 0
-+    mov     w2, #0x5004                 // offset (clock page 5, word +4)
-+    mov     x3, #0                      // die 0
-+    blr     x8                          // x0 = page 5 +0x4
-+    b       2f
-+1:
-+    movz    x0, #0xdead                 // sentinel: capture never ran
-+2:
-+    ldr     x1, [x0]                    // deliberate data abort: far = x0
-+    brk     #0                          // unreachable fallback
++    ldr     x19, [x16]                  // x19 = saved PMGR object
++    cbz     x19, Lnot_captured
++    ldr     x9, [x19, #0xa70]           // x9 = region-0 mapped base VA
++
++    // clock page 5 = base + 0x5000  (16 words -> x10..x25)
++    add     x8, x9, #0x5, lsl #12
++    ldr     w10, [x8, #0x00]
++    ldr     w11, [x8, #0x04]
++    ldr     w12, [x8, #0x08]
++    ldr     w13, [x8, #0x0c]
++    ldr     w14, [x8, #0x10]
++    ldr     w15, [x8, #0x14]
++    ldr     w16, [x8, #0x18]
++    ldr     w17, [x8, #0x1c]
++    ldr     w18, [x8, #0x20]
++    ldr     w19, [x8, #0x24]
++    ldr     w20, [x8, #0x28]
++    ldr     w21, [x8, #0x2c]
++    ldr     w22, [x8, #0x30]
++    ldr     w23, [x8, #0x34]
++    ldr     w24, [x8, #0x38]
++    ldr     w25, [x8, #0x3c]
++
++    // GFX perf-state control: base + 0x1c200 (x26), + 0x1c300 (x27)
++    add     x8, x9, #0x1c, lsl #12
++    ldr     w26, [x8, #0x200]
++    ldr     w27, [x8, #0x300]
++
++    // 0x2300c -> x28
++    add     x8, x9, #0x23, lsl #12
++    ldr     w28, [x8, #0xc]
++
++    movz    x0, #0xbeef                 // magic: dump captured
++    ldr     x1, [x0]                    // data abort -> far = 0xbeef
++    brk     #0
++
++Lnot_captured:
++    movz    x0, #0xdead                 // magic: capture hook never ran
++    ldr     x1, [x0]                    // data abort -> far = 0xdead
++    brk     #0
 +
 +    .p2align 3
 +_j96_page5_buffer:
