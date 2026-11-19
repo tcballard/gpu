@@ -3,12 +3,14 @@
  * KPF component (this PongoOS checkout's kpf.h API).
  *
  * Two hooks, read-only (no MMIO store):
- *   capture  ApplePMGR ps-poll `blr x8` (0x66e4294)  -> save PMGR object
+ *   capture  ApplePMGR ps-poll `blr x8` (0x66e4294)  -> save PMGR object and
+ *            snapshot the six clock pages' +0x04 (the ps_gfx-on time point)
  *   read     AGXG4P post-GPC-poll `mov w0,#0xa` (0x6695a44) -> dump the six
- *            clock pages' +0x04, ps_gfx, the GFX perf-state control words,
- *            0x2300c and the page-5 diff words into x2..x21, then fault.
+ *            clock pages' +0x04 (post-GPC), ps_gfx, the GFX perf-state control
+ *            words, 0x2300c and the page-5 diff words into x2..x21, plus the
+ *            capture-time six pages' +0x04 into x22..x27, then fault.
  *
- * The dump lands in the panic report's x2..x21 (register map in
+ * The dump lands in the panic report's x2..x27 (register map in
  * j96_page5_shell.S); x18 is skipped (Darwin platform register).
  */
 #include "kpf.h"
@@ -20,7 +22,8 @@
 #include <string.h>
 
 extern uint32_t j96_page5_start[], j96_page5_end[];
-extern uint32_t j96_page5_poll_capture[], j96_page5_read[], j96_page5_buffer[];
+extern uint32_t j96_page5_poll_capture[], j96_page5_read[], j96_page5_write_trace[];
+extern uint32_t j96_page5_buffer[];
 
 /*
  * PORTING CONFIG ------------------------------------------------------------
@@ -71,11 +74,24 @@ static const uint32_t rd_sig[8] = {
 #define RD_LEN 8
 #define RD_SITE 6
 
+/* write signature: 6 words ending at `str w21,[x8,w19,uxtw]` (0x66ed538). */
+static const uint32_t wr_sig[6] = {
+    0xaa1703e0,  /* 0x66ed524  mov x0, x23                */
+    0xaa1603e1,  /* 0x66ed528  mov x1, x22                */
+    0xaa1403e2,  /* 0x66ed52c  mov x2, x20                */
+    0x97ffdc2d,  /* 0x66ed530  bl 0x66e45e4               */
+    0xf9400c08,  /* 0x66ed534  ldr x8, [x0, #0x18]        */
+    0xb8334915,  /* 0x66ed538  str w21, [x8, w19, uxtw]  <- site */
+};
+#define WR_LEN 6
+#define WR_SITE 5
+
 static struct mach_header_64 *kernel;
 static uint32_t *cap_site;
 static uint32_t *rd_site;
+static uint32_t *wr_site;
 static uint32_t *my_shellcode;
-static unsigned cap_count, rd_count;
+static unsigned cap_count, rd_count, wr_count;
 static bool armed;
 
 static bool f_capture(struct xnu_pf_patch *patch, void *stream) {
@@ -92,6 +108,13 @@ static bool f_read(struct xnu_pf_patch *patch, void *stream) {
     return true;
 }
 
+static bool f_write(struct xnu_pf_patch *patch, void *stream) {
+    (void)patch;
+    wr_count++;
+    wr_site = (uint32_t *)stream + WR_SITE;
+    return true;
+}
+
 static void capture_p(xnu_pf_patchset_t *set) {
     uint64_t v[CAP_LEN], m[CAP_LEN];
     for (unsigned k = 0; k < CAP_LEN; k++) { v[k] = cap_sig[k]; m[k] = 0xffffffff; }
@@ -102,6 +125,12 @@ static void read_p(xnu_pf_patchset_t *set) {
     uint64_t v[RD_LEN], m[RD_LEN];
     for (unsigned k = 0; k < RD_LEN; k++) { v[k] = rd_sig[k]; m[k] = 0xffffffff; }
     xnu_pf_maskmatch(set, "j96_page5_read", v, m, RD_LEN, true, f_read);
+}
+
+static void write_p(xnu_pf_patchset_t *set) {
+    uint64_t v[WR_LEN], m[WR_LEN];
+    for (unsigned k = 0; k < WR_LEN; k++) { v[k] = wr_sig[k]; m[k] = 0xffffffff; }
+    xnu_pf_maskmatch(set, "j96_page5_write", v, m, WR_LEN, true, f_write);
 }
 
 static void init(struct mach_header_64 *hdr, xnu_pf_range_t *cstring,
@@ -137,6 +166,8 @@ static bool target_ok(void) {
         return false;
     if (rd_count != 1 || !rd_site || memcmp(rd_site - RD_SITE, rd_sig, RD_LEN * 4))
         return false;
+    if (wr_count != 1 || !wr_site || memcmp(wr_site - WR_SITE, wr_sig, WR_LEN * 4))
+        return false;
     return true;
 }
 
@@ -155,7 +186,7 @@ static uint32_t size(void) {
 static uint32_t emit(uint32_t *area) {
     my_shellcode = area;
     if (!target_ok()) {
-        printf("J96_PAGE5_EMIT prepared=0 cap=%u rd=%u\n", cap_count, rd_count);
+        printf("J96_PAGE5_EMIT prepared=0 cap=%u rd=%u wr=%u\n", cap_count, rd_count, wr_count);
         return 0;
     }
     memcpy(area, j96_page5_start, (size_t)size() * 4);
@@ -174,13 +205,15 @@ static uint32_t emit(uint32_t *area) {
 
 static void finish(struct mach_header_64 *hdr, checkrain_option_t *checkra1n_flags) {
     (void)checkra1n_flags;
-    uint32_t bc, br;
-    bool ok = armed && target_ok() && my_shellcode && cap_site && rd_site &&
+    uint32_t bc, br, bw;
+    bool ok = armed && target_ok() && my_shellcode && cap_site && rd_site && wr_site &&
               branch(cap_site, my_shellcode + (j96_page5_poll_capture - j96_page5_start), true, &bc) &&
-              branch(rd_site,  my_shellcode + (j96_page5_read - j96_page5_start),     true, &br);
+              branch(rd_site,  my_shellcode + (j96_page5_read - j96_page5_start),     true, &br) &&
+              branch(wr_site,  my_shellcode + (j96_page5_write_trace - j96_page5_start), true, &bw);
     if (ok) {
         cap_site[0] = bc;
         rd_site[0] = br;
+        wr_site[0] = bw;
     }
     printf("J96_PAGE5_PATCH applied=%d\n", ok ? 1 : 0);
 }
@@ -192,6 +225,7 @@ kpf_component_t j96_page5_capture = {
     .shc_emit = emit,
     .patches = {
         { "com.apple.driver.ApplePMGR", "__TEXT_EXEC", "__text", XNU_PF_ACCESS_32BIT, capture_p },
+        { "com.apple.driver.ApplePMGR", "__TEXT_EXEC", "__text", XNU_PF_ACCESS_32BIT, write_p },
         { "com.apple.AGXG4P", "__TEXT_EXEC", "__text", XNU_PF_ACCESS_32BIT, read_p },
         {}
     },

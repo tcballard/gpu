@@ -38,6 +38,14 @@ RD_SITE = 6
 RD_EXPECT = 0xfffffff006695a44
 RD_INSTR = 0x52800140  # mov w0,#0xa
 
+# write site: `str w21,[x8,w19,uxtw]` at 0xfffffff0066ed538 (ApplePMGR generic write)
+WR_SIG = [
+    0xaa1703e0, 0xaa1603e1, 0xaa1403e2, 0x97ffdc2d, 0xf9400c08, 0xb8334915,
+]
+WR_SITE = 5
+WR_EXPECT = 0xfffffff0066ed538
+WR_INSTR = 0xb8334915  # str w21, [x8, w19, uxtw]
+
 
 def find_sites(k, sig, site_idx):
     hits = []
@@ -85,6 +93,15 @@ def main():
               'OK' if h == RD_EXPECT and w == RD_INSTR else 'MISMATCH'))
         ok &= h == RD_EXPECT and w == RD_INSTR
     ok &= len(rd_hits) == 1
+
+    wr_hits = find_sites(k, WR_SIG, WR_SITE)
+    print('write site hits:', len(wr_hits))
+    for h in wr_hits:
+        w = struct.unpack_from('<I', b, k.fo(h))[0]
+        print('  site 0x%x (0x%08x) %s' % (h & 0xfffffff, w,
+              'OK' if h == WR_EXPECT and w == WR_INSTR else 'MISMATCH'))
+        ok &= h == WR_EXPECT and w == WR_INSTR
+    ok &= len(wr_hits) == 1
 
     print('RESULT:', 'GO' if ok else 'NO-GO')
     return 0 if ok else 1

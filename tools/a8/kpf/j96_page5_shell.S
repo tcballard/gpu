@@ -9,15 +9,19 @@
  *   region-0 mapped base VA is at [pmgr + 0xa70]  (regionmap(0,0)->+0x18).
  *
  * Register -> value map (read from the panic report's x0..x28):
- *   x2  = page0 +0x04   x3  = page1 +0x04   x4  = page2 +0x04
- *   x5  = page3 +0x04   x6  = page4 +0x04   x7  = page5 +0x04
+ *   x2  = page0 +0x04   x3  = page1 +0x04   x4  = page2 +0x04   (POST-GPC)
+ *   x5  = page3 +0x04   x6  = page4 +0x04   x7  = page5 +0x04   (POST-GPC)
  *   x10 = page5 +0x00   x11 = page5 +0x08   x12 = page5 +0x18
  *   x13 = page5 +0x1c   x14 = page5 +0x20
  *   x15 = ps_gfx  (PMGR +0x20320)
  *   x16 = +0x1c200 (GFX perf-state control)
  *   x17 = +0x1c300
  *   x19 = +0x2300c
- *   x20 = page0 +0x00   x21 = page0 +0x08
+ *   x20 = first page-5 write offset (0 if none)   x21 = first write value
+ *   x22..x27 = page0..page5 +0x04 at the CAPTURE hook (ps_gfx power-on, early),
+ *              diffed against x2..x7 (post-GPC) to show when bit 30 comes up.
+ *   x28 = number of page-5 writes seen (0 = page 5 is a hardware status, never
+ *         written by any driver during the power-on)
  *   (x18 is skipped: it is the Darwin platform register and the panic dump
  *    does not show the zero-extended 32-bit value for it.)
  *   far      = 0xbeef  (dump captured)  /  0xdead  (capture hook never ran)
@@ -32,6 +36,7 @@
     .p2align 2
     .globl _j96_page5_start, _j96_page5_end
     .globl _j96_page5_poll_capture, _j96_page5_read
+    .globl _j96_page5_write_trace
     .globl _j96_page5_buffer
 
 _j96_page5_start:
@@ -42,14 +47,66 @@ _j96_page5_poll_capture:
     stp     x29, x30, [sp, #-16]!
     ldr     x16, _j96_page5_buffer
     str     x20, [x16]                  // buffer[0] = PMGR object
+    // Early (power-gate) snapshot of the six clock pages' +0x04, so the
+    // read-hook (post-GPC) value can be diffed against the ps_gfx-on value.
+    ldr     x9, [x20, #0xa70]           // region-0 mapped base VA
+    cbz     x9, Lcap_unmapped
+    ldr     w10, [x9, #0x004]           // page0 +0x04
+    ldr     w11, [x9, #0x1004]          // page1 +0x04
+    ldr     w12, [x9, #0x2004]          // page2 +0x04
+    ldr     w13, [x9, #0x3004]          // page3 +0x04
+    add     x14, x9, #0x4, lsl #12
+    ldr     w14, [x14, #0x004]          // page4 +0x04
+    add     x15, x9, #0x5, lsl #12
+    ldr     w15, [x15, #0x004]          // page5 +0x04
+    stp     w10, w11, [x16, #8]         // buffer[1..2] = page0/1 +0x04
+    stp     w12, w13, [x16, #16]        // buffer[3..4] = page2/3 +0x04
+    stp     w14, w15, [x16, #24]        // buffer[5..6] = page4/5 +0x04
+    b       Lcap_run
+Lcap_unmapped:
+    movz    w10, #0xdead
+    movk    w10, #0xdead, lsl #16
+    str     w10, [x16, #8]              // buffer[1] = sentinel (region not mapped)
+Lcap_run:
     blr     x8                          // run the original poll
     ldp     x29, x30, [sp], #16
+    ret
+
+// --- write hook (replaces `str w21,[x8,w19,uxtw]` of the generic write) ------
+// At entry: x8 = base VA, w19 = offset, w21 = value, x30 = the continuation.
+// Records every write whose offset is in [0x5000, 0x5040) (the page-5 clock
+// block) into buffer[7]=count, buffer[8 + 2*n]={offset, value}, so the read
+// hook can tell whether page 5 is driver-written or a hardware status.
+_j96_page5_write_trace:
+    ldr     x16, _j96_page5_buffer
+    mov     w9, #0x5000
+    cmp     w19, w9
+    b.lo    Lwt_done                    // offset < 0x5000
+    mov     w9, #0x5040
+    cmp     w19, w9
+    b.hs    Lwt_done                    // offset >= 0x5040
+    ldr     w10, [x16, #32]             // write count (word 8)
+    cmp     w10, #16                    // cap at 16 entries
+    b.hs    Lwt_done
+    add     x11, x16, #40               // trace base (word 10)
+    add     x11, x11, x10, lsl #3
+    stp     w19, w21, [x11]             // record {offset, value}
+    add     w10, w10, #1
+    str     w10, [x16, #32]
+Lwt_done:
+    str     w21, [x8, w19, uxtw]        // the original write
     ret
 
 // --- read hook (replaces `mov w0,#0xa` after the GPC busy poll) -------------
 _j96_page5_read:
     ldr     x16, _j96_page5_buffer
     ldr     x0, [x16]                   // x0 = saved PMGR object
+    ldr     w22, [x16, #8]              // capture-time page0 +0x04
+    ldr     w23, [x16, #12]             // capture-time page1 +0x04
+    ldr     w24, [x16, #16]             // capture-time page2 +0x04
+    ldr     w25, [x16, #20]             // capture-time page3 +0x04
+    ldr     w26, [x16, #24]             // capture-time page4 +0x04
+    ldr     w27, [x16, #28]             // capture-time page5 +0x04
     cbz     x0, Lnot_captured
     ldr     x9, [x0, #0xa70]            // x9 = region-0 mapped base VA
 
@@ -83,9 +140,10 @@ _j96_page5_read:
     add     x8, x9, #0x23, lsl #12
     ldr     w19, [x8, #0xc]
 
-    // page0 +0x00, +0x08 (config context)
-    ldr     w20, [x9, #0x00]
-    ldr     w21, [x9, #0x08]
+    // write trace: page-5 write count + the first recorded (offset, value)
+    ldr     w28, [x16, #32]             // page-5 write count
+    ldr     w20, [x16, #40]             // first write offset (0 if none)
+    ldr     w21, [x16, #44]             // first write value
 
     movz    x0, #0xbeef                 // magic: dump captured
     ldr     x1, [x0]                    // data abort -> far = 0xbeef

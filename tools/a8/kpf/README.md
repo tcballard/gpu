@@ -7,17 +7,30 @@ that differ from Linux, at the AGX power-on point, so the working iPadOS state
 can be diffed against Linux. See the full spec in
 `~/Projects/j96-omarchy/gpu/ios-panic-probe/README.md`.
 
-Two hooks (J81 `page5writer` approach, no `ml_io_map`):
-- **capture** `0x66e4294` (ApplePMGR ps-poll `blr x8`) — saves the PMGR object.
+Three hooks (J81 `page5writer` approach, no `ml_io_map`), all read-only:
+- **capture** `0x66e4294` (ApplePMGR ps-poll `blr x8`) — saves the PMGR object
+  and snapshots the six clock pages' `+0x04` (the ps_gfx-on time point).
+- **write** `0x66ed538` (ApplePMGR generic write `str w21,[x8,w19,uxtw]`) —
+  records every write whose offset is in `[0x5000, 0x5040)` (the page-5 clock
+  block) as `{offset, value}` pairs, then runs the original write. `x28` = the
+  count (0 ⇒ page 5 is a hardware status, never driver-written).
 - **read** `0x6695a44` (AGXG4P post-GPC-poll `mov w0,#0xa`) — reads the region-0
-  mapped base from `[pmgr + 0xa70]`, dumps 17 words into `x2..x21`, then faults
-  (`far = 0xbeef`). Register map in `j96_page5_shell.S` and `decode_dump.py`.
+  mapped base from `[pmgr + 0xa70]`, dumps the six pages' `+0x04` (post-GPC,
+  `x2..x7`), the capture-time values (`x22..x27`), the page-5 words and control
+  registers (`x10..x19`) and the first recorded page-5 write (`x20`,`x21`), then
+  faults (`far = 0xbeef`). Register map in `j96_page5_shell.S` and
+  `decode_dump.py`.
+
+The `x22..x27` vs `x2..x7` diff shows *when* page-5 `+0x04` bit 30 comes up, and
+`x28`/`x20`/`x21` show *whether a driver writes it at all* — together they decide
+"PLL enable written by a driver" vs "hardware status set during the GPC
+transition".
 
 ## Files
 
 | File | What |
 |---|---|
-| `j96-kpf.patch` | 4-file patch (2 new + 2 one-line) to apply to `checkra1n/pongoOS` |
+| `j96-kpf.patch` | 2-new-file patch to apply to `checkra1n/pongoOS` (`.c` + `.S`) |
 | `j96_page5_capture.c` | KPF component (for reference; already in the patch) |
 | `j96_page5_shell.S` | shellcode (for reference; already in the patch) |
 | `verify_sites.py` | offline signature/UUID check against the kernelcache |
@@ -45,7 +58,7 @@ the dump was captured, `0xdead` means the capture hook never ran. The page-5
 
 ## Porting
 
-The two-hook technique is SoC-agnostic, but the parameters are not. The hook
+The three-hook technique is SoC-agnostic, but the parameters are not. The hook
 sites, signatures, kernel UUID, kext bundle IDs and PMGR offsets are all
 A8/T7000 + `19H386`-specific. See the "PORTING CONFIG" block at the top of
 `j96_page5_capture.c` for exactly what to re-derive for a new SoC or OS build.
