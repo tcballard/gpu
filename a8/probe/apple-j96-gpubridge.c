@@ -111,7 +111,7 @@
 #include <linux/sysfs.h>
 
 enum { J96GB_WRITE = 1, J96GB_ID_AUTO, J96GB_ID, J96GB_READBACK, J96GB_AUTO_WATCH, J96GB_FENDER_SCAN, J96GB_CLOCK_SNAP,
-       J96GB_CLOCK_WIDE, J96GB_DWI_READ, J96GB_DWI_CLOCK, J96GB_HANDOFF_SNAP };
+       J96GB_CLOCK_WIDE, J96GB_DWI_READ, J96GB_DWI_CLOCK, J96GB_HANDOFF_SNAP, J96GB_CLOCK_TRIAL };
 static const char *const j96gb_tokens[] = {
 	[J96GB_WRITE] = "gpu-bridge-write",
 	[J96GB_ID_AUTO] = "gpu-bridge-id-auto",
@@ -124,6 +124,7 @@ static const char *const j96gb_tokens[] = {
 	[J96GB_DWI_READ] = "gpu-dwi-read",
 	[J96GB_DWI_CLOCK] = "gpu-dwi-ios-clock",
 	[J96GB_HANDOFF_SNAP] = "gpu-pmgr-handoff-snap",
+	[J96GB_CLOCK_TRIAL] = "gpu-clock-trial",
 };
 
 /* PMGR power-state register (drivers/pmdomain/apple/pmgr-pwrstate.c). */
@@ -923,14 +924,19 @@ static int j96gb_clock_snapshot(struct j96_gpubridge *gb, const char *when, bool
  * and the GPC 0 -> 1 transition. Fender and bridges exactly as gpu-fender-scan; no RGX access.
  */
 /*
- * gpu-pmgr-clock-wide: every word of the clock pages and of +0x1c000..+0x1c3fc. Page 5 and the
- * control area come first, so they are the samples closest to the GPC 1 poll.
+ * gpu-pmgr-clock-wide: every word of the clock pages and of +0x1c000..+0x1c3fc, plus 0x23000.
+ * Page 5 and the control area come first, so they are the samples closest to the GPC 1 poll.
  */
 static const struct { u32 start, words; } j96gb_wide_regions[] = {
 	{ 0x5000, 16 }, { 0x1c200, 64 }, { 0x1c300, 64 }, { 0x1c000, 64 }, { 0x1c100, 64 },
 	{ 0x0000, 16 }, { 0x1000, 16 }, { 0x2000, 16 }, { 0x3000, 16 }, { 0x4000, 16 },
+	{ 0x23000, 16 },
 };
-#define J96GB_WIDE_WORDS (6 * 16 + 4 * 64)
+#define J96GB_WIDE_WORDS (6 * 16 + 4 * 64 + 16)
+
+/* gpu-clock-trial candidates: 0x2300c differs (Linux 0 vs iPadOS 0x15f at post-poll). */
+#define J96GB_TRIAL_REG		0x2300c
+#define J96GB_TRIAL_VAL		0x15f
 static u32 j96gb_wide_base[J96GB_WIDE_WORDS], j96gb_wide_cur[J96GB_WIDE_WORDS];
 
 static int j96gb_clock_wide(struct j96_gpubridge *gb, const char *when, bool first)
@@ -1055,6 +1061,24 @@ static int j96gb_run_clock_snap(struct j96_gpubridge *gb, int mode)
 	ret = snap(gb, "2-bridged", false);
 	if (ret)
 		goto out;
+
+	/*
+	 * gpu-clock-trial (19 Nov 2026): empirical test for the missing page-5
+	 * bit-30 write. 0x2300c differs between Linux (0) and iPadOS (0x15f) at
+	 * the post-poll point, so trial-write the iPadOS value before the GPC
+	 * request and watch whether page-5 +0x04 bit 30 comes up in "3-gpc1".
+	 * Change TRIAL_REG/TRIAL_VAL to test other candidates.
+	 */
+	if (mode == J96GB_CLOCK_TRIAL) {
+		u32 t = 0;
+		J96GB_ANNOUNCE(gb, "trial-write pmgr +0x%05x = 0x%08x", J96GB_TRIAL_REG, J96GB_TRIAL_VAL);
+		j96gb_pmgr_rd(gb, J96GB_TRIAL_REG, &t);
+		dev_emerg(dev, "J96GB_TRIAL +0x%05x was %08x\n", J96GB_TRIAL_REG, t);
+		regmap_write(gb->pmgr, J96GB_TRIAL_REG, J96GB_TRIAL_VAL);
+		j96gb_pmgr_rd(gb, J96GB_TRIAL_REG, &t);
+		dev_emerg(dev, "J96GB_TRIAL +0x%05x wrote %08x -> readback %08x\n",
+			  J96GB_TRIAL_REG, J96GB_TRIAL_VAL, t);
+	}
 
 	ret = -EIO;
 	J96GB_ANNOUNCE(gb, "write Fender+0x10000 = 0x%08x", FNDR_SEQ_END);
@@ -1275,6 +1299,7 @@ static ssize_t attempt_store(struct device *dev, struct device_attribute *attr,
 		case J96GB_CLOCK_SNAP:
 		case J96GB_CLOCK_WIDE:
 		case J96GB_DWI_CLOCK:
+		case J96GB_CLOCK_TRIAL:
 			ret = j96gb_run_clock_snap(gb, mode);
 			break;
 		case J96GB_DWI_READ:
