@@ -68,25 +68,23 @@ Lcap_unmapped:
     movk    w10, #0xdead, lsl #16
     str     w10, [x16, #8]              // buffer[1] = sentinel (region not mapped)
 Lcap_run:
+    str     wzr, [x16, #32]             // reset the write-trace count (ps-gate boundary)
     blr     x8                          // run the original poll
     ldp     x29, x30, [sp], #16
     ret
 
 // --- write hook (replaces `str w21,[x8,w19,uxtw]` of the generic write) ------
 // At entry: x8 = base VA, w19 = offset, w21 = value, x30 = the continuation.
-// Records every write whose offset is in [0x5000, 0x5040) (the page-5 clock
-// block) into buffer[7]=count, buffer[8 + 2*n]={offset, value}, so the read
-// hook can tell whether page 5 is driver-written or a hardware status.
+// Records every PMGR region-0 write (offset < 0x40000) into
+// buffer[8]=count, buffer[10 + 2*n]={offset, value}, so the read hook can see
+// everything the power-on writes (ps, perf-regs 0x28000, clock pages, ...).
 _j96_page5_write_trace:
     ldr     x16, _j96_page5_buffer
-    mov     w9, #0x5000
+    mov     w9, #0x40000                 // region-0 size
     cmp     w19, w9
-    b.lo    Lwt_done                    // offset < 0x5000
-    mov     w9, #0x5040
-    cmp     w19, w9
-    b.hs    Lwt_done                    // offset >= 0x5040
+    b.hs    Lwt_done                    // offset >= 0x40000 (not region 0)
     ldr     w10, [x16, #32]             // write count (word 8)
-    cmp     w10, #16                    // cap at 16 entries
+    cmp     w10, #64                    // cap at 64 entries
     b.hs    Lwt_done
     add     x11, x16, #40               // trace base (word 10)
     add     x11, x11, x10, lsl #3
@@ -141,12 +139,11 @@ _j96_page5_read:
     ldr     w19, [x8, #0xc]
 
     // write trace: page-5 write count + the first recorded (offset, value).
-    // Reload the buffer pointer: x16 was clobbered above by `ldr w16,[x8,#0x200]`
-    // (the +0x1c200 perf-control word).
-    ldr     x16, _j96_page5_buffer
-    ldr     w28, [x16, #32]             // page-5 write count
-    ldr     w20, [x16, #40]             // first write offset (0 if none)
-    ldr     w21, [x16, #44]             // first write value
+    // Reload the buffer pointer into x8 (x16 still holds the +0x1c200 word).
+    ldr     x8, _j96_page5_buffer
+    ldr     w28, [x8, #32]             // page-5 write count
+    ldr     w20, [x8, #40]             // first write offset (0 if none)
+    ldr     w21, [x8, #44]             // first write value
 
     movz    x0, #0xbeef                 // magic: dump captured
     ldr     x1, [x0]                    // data abort -> far = 0xbeef
