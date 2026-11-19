@@ -238,10 +238,10 @@ index 0000000..53521a6
 +};
 diff --git i/checkra1n/kpf/j96_page5_shell.S w/checkra1n/kpf/j96_page5_shell.S
 new file mode 100644
-index 0000000..60933ee
+index 0000000..e5534e3
 --- /dev/null
 +++ w/checkra1n/kpf/j96_page5_shell.S
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,174 @@
 +/*
 + * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) full-state dump probe.
 + * Same two hooks as before, but the read hook captures the six clock pages'
@@ -319,14 +319,27 @@ index 0000000..60933ee
 +
 +// --- write hook (replaces `str w21,[x8,w19,uxtw]` of the generic write) ------
 +// At entry: x8 = base VA, w19 = offset, w21 = value, x30 = the continuation.
-+// Records every PMGR region-0 write (offset < 0x40000) into
-+// buffer[8]=count, buffer[10 + 2*n]={offset, value}, so the read hook can see
-+// everything the power-on writes (ps, perf-regs 0x28000, clock pages, ...).
++// Records writes to the GPU-late PMGR regions only (page 5, the GFX perf table
++// 0x1c000-0x1d000, and the perf-regs 0x28000-0x29000). It deliberately does NOT
++// record the early-boot ps/clock writes, so the buffer is only touched late in
++// boot (the all-region variant faulted writing the buffer too early).
 +_j96_page5_write_trace:
 +    ldr     x16, _j96_page5_buffer
-+    mov     w9, #0x40000                 // region-0 size
-+    cmp     w19, w9
-+    b.hs    Lwt_done                    // offset >= 0x40000 (not region 0)
++    cmp     w19, #0x5000                 // page 5 [0x5000, 0x6000)
++    b.lo    Lwt_chk_perf
++    cmp     w19, #0x6000
++    b.lo    Lwt_record
++Lwt_chk_perf:
++    cmp     w19, #0x1c000                // GFX perf table [0x1c000, 0x1d000)
++    b.lo    Lwt_chk_preg
++    cmp     w19, #0x1d000
++    b.lo    Lwt_record
++Lwt_chk_preg:
++    cmp     w19, #0x28000                // perf-regs [0x28000, 0x29000)
++    b.lo    Lwt_done
++    cmp     w19, #0x29000
++    b.hs    Lwt_done
++Lwt_record:
 +    ldr     w10, [x16, #32]             // write count (word 8)
 +    cmp     w10, #64                    // cap at 64 entries
 +    b.hs    Lwt_done
