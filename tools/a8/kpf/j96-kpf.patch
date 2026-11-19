@@ -403,3 +403,27 @@ index 0000000..53d8a73
 +    .quad   0                            // filled by emit() = kernel VA of buffer
 +
 +_j96_page5_end:
+diff --git i/checkra1n/kpf/kpf.h w/checkra1n/kpf/kpf.h
+index 38754eb..b060095 100644
+--- i/checkra1n/kpf/kpf.h
++++ w/checkra1n/kpf/kpf.h
+@@ -114,6 +114,7 @@ extern struct kernel_version
+ extern kpf_component_t kpf_bindfs;
+ extern kpf_component_t kpf_developer_mode;
+ extern kpf_component_t kpf_dyld;
++extern kpf_component_t j96_page5_capture;
+ extern kpf_component_t kpf_launch_constraints;
+ extern kpf_component_t kpf_mach_port;
+ extern kpf_component_t kpf_nvram;
+diff --git i/checkra1n/kpf/main.c w/checkra1n/kpf/main.c
+index fdea399..75802be 100644
+--- i/checkra1n/kpf/main.c
++++ w/checkra1n/kpf/main.c
+@@ -1539,6 +1539,7 @@ static void kpf_cmd(void)
+         &kpf_launch_constraints,
+         &kpf_mach_port,
+         &kpf_nvram,
++        &j96_page5_capture,
+         &kpf_shellcode,
+         &kpf_overlay,
+         &kpf_ramdisk,
