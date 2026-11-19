@@ -238,10 +238,10 @@ index 0000000..53521a6
 +};
 diff --git i/checkra1n/kpf/j96_page5_shell.S w/checkra1n/kpf/j96_page5_shell.S
 new file mode 100644
-index 0000000..53d8a73
+index 0000000..27e61ff
 --- /dev/null
 +++ w/checkra1n/kpf/j96_page5_shell.S
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,164 @@
 +/*
 + * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) full-state dump probe.
 + * Same two hooks as before, but the read hook captures the six clock pages'
@@ -384,7 +384,10 @@ index 0000000..53d8a73
 +    add     x8, x9, #0x23, lsl #12
 +    ldr     w19, [x8, #0xc]
 +
-+    // write trace: page-5 write count + the first recorded (offset, value)
++    // write trace: page-5 write count + the first recorded (offset, value).
++    // Reload the buffer pointer: x16 was clobbered above by `ldr w16,[x8,#0x200]`
++    // (the +0x1c200 perf-control word).
++    ldr     x16, _j96_page5_buffer
 +    ldr     w28, [x16, #32]             // page-5 write count
 +    ldr     w20, [x16, #40]             // first write offset (0 if none)
 +    ldr     w21, [x16, #44]             // first write value

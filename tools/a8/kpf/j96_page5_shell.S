@@ -140,7 +140,10 @@ _j96_page5_read:
     add     x8, x9, #0x23, lsl #12
     ldr     w19, [x8, #0xc]
 
-    // write trace: page-5 write count + the first recorded (offset, value)
+    // write trace: page-5 write count + the first recorded (offset, value).
+    // Reload the buffer pointer: x16 was clobbered above by `ldr w16,[x8,#0x200]`
+    // (the +0x1c200 perf-control word).
+    ldr     x16, _j96_page5_buffer
     ldr     w28, [x16, #32]             // page-5 write count
     ldr     w20, [x16, #40]             // first write offset (0 if none)
     ldr     w21, [x16, #44]             // first write value
