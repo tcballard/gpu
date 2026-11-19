@@ -1,13 +1,15 @@
 /*
- * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) page-5 +0x4 planned-panic
+ * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) full-state planned-panic
  * KPF component (this PongoOS checkout's kpf.h API).
  *
  * Two hooks, read-only (no MMIO store):
  *   capture  ApplePMGR ps-poll `blr x8` (0x66e4294)  -> save PMGR object
- *   read     AGXG4P post-GPC-poll `mov w0,#0xa` (0x6695a44) -> read page 5 +0x4
- *            via [pmgr]->vt[0x980] and fault.
+ *   read     AGXG4P post-GPC-poll `mov w0,#0xa` (0x6695a44) -> dump the six
+ *            clock pages (+0x00/+0x04/+0x08), ps_gfx, the GFX perf-state
+ *            control words and 0x2300c into x1..x28, then fault (far=0xbeef).
  *
- * The page-5 value lands in the panic report's x0 and far.
+ * The dump lands in the panic report's x1..x28 (register map in
+ * j96_page5_shell.S); x18 is skipped (Darwin platform register).
  */
 #include "kpf.h"
 #include <pongo.h>

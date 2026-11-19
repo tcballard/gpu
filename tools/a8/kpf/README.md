@@ -1,14 +1,16 @@
-# J96 page-5 KPF probe (palera1n `--override-kpf`)
+# J96 full-state KPF probe (palera1n `--override-kpf`)
 
 Read-only planned-panic probe for the iPad mini 4 (J96, A8, iPadOS 15.8.3
-`19H386`). Captures PMGR clock page 5 `+0x4` at the AGX power-on point so the
-working iPadOS value can be diffed against Linux. See the full spec in
-`~/Projects/j96-omarchy/gpu/ios-panic-probe/README.md`.
+`19H386`). Captures the six PMGR clock pages (`+0x00`/`+0x04`/`+0x08` each),
+`ps_gfx`, the GFX perf-state control words and `0x2300c` at the AGX power-on
+point so the working iPadOS state can be diffed against Linux. See the full
+spec in `~/Projects/j96-omarchy/gpu/ios-panic-probe/README.md`.
 
 Two hooks (J81 `page5writer` approach, no `ml_io_map`):
 - **capture** `0x66e4294` (ApplePMGR ps-poll `blr x8`) — saves the PMGR object.
-- **read** `0x6695a44` (AGXG4P post-GPC-poll `mov w0,#0xa`) — reads page 5 via
-  `[pmgr]->vt[0x980](pmgr, 0, 0x5004, 0)` and faults (value lands in `x0`/`far`).
+- **read** `0x6695a44` (AGXG4P post-GPC-poll `mov w0,#0xa`) — reads the region-0
+  mapped base from `[pmgr + 0xa70]`, dumps 25 words into `x1..x28`, then faults
+  (`far = 0xbeef`). Register map in `j96_page5_shell.S` and `decode_dump.py`.
 
 ## Files
 
@@ -35,6 +37,7 @@ sudo palera1n --rootless \
   --override-kpf <path>/checkra1n-kpf-pongo --debug-logging
 ```
 
-Unlock after reboot and read `x0`/`far` from the panic report
-(`collect-ios-reports.sh`). `x0 == far == 0x40000000` = page-5 bit 30 set after
-the GPC poll; `0` = still clear; `0xdead` = the capture hook never ran.
+Unlock after reboot and collect the panic report (`collect-ios-reports.sh`).
+Decode the dump with `decode_dump.py panic-full-*.ips`: `far == 0xbeef` means
+the dump was captured, `0xdead` means the capture hook never ran. The page-5
+`+0x04` value (register `x20`) is the M1 answer: bit 30 set = GFX PLL running.
