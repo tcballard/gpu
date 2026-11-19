@@ -68,7 +68,6 @@ Lcap_unmapped:
     movk    w10, #0xdead, lsl #16
     str     w10, [x16, #8]              // buffer[1] = sentinel (region not mapped)
 Lcap_run:
-    str     wzr, [x16, #32]             // reset the write-trace count (ps-gate boundary)
     blr     x8                          // run the original poll
     ldp     x29, x30, [sp], #16
     ret
@@ -152,11 +151,11 @@ _j96_page5_read:
     ldr     w19, [x8, #0xc]
 
     // write trace: page-5 write count + the first recorded (offset, value).
-    // Reload the buffer pointer into x8 (x16 still holds the +0x1c200 word).
-    ldr     x8, _j96_page5_buffer
-    ldr     w28, [x8, #32]             // page-5 write count
-    ldr     w20, [x8, #40]             // first write offset (0 if none)
-    ldr     w21, [x8, #44]             // first write value
+    // Reload the buffer pointer into x16 (x16 was clobbered by the +0x1c200 word).
+    ldr     x16, _j96_page5_buffer
+    ldr     w28, [x16, #32]             // page-5 write count
+    ldr     w20, [x16, #40]             // first write offset (0 if none)
+    ldr     w21, [x16, #44]             // first write value
 
     movz    x0, #0xbeef                 // magic: dump captured
     ldr     x1, [x0]                    // data abort -> far = 0xbeef
