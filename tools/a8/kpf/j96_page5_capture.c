@@ -5,10 +5,10 @@
  * Two hooks, read-only (no MMIO store):
  *   capture  ApplePMGR ps-poll `blr x8` (0x66e4294)  -> save PMGR object
  *   read     AGXG4P post-GPC-poll `mov w0,#0xa` (0x6695a44) -> dump the six
- *            clock pages (+0x00/+0x04/+0x08), ps_gfx, the GFX perf-state
- *            control words and 0x2300c into x1..x28, then fault (far=0xbeef).
+ *            clock pages' +0x04, ps_gfx, the GFX perf-state control words,
+ *            0x2300c and the page-5 diff words into x2..x21, then fault.
  *
- * The dump lands in the panic report's x1..x28 (register map in
+ * The dump lands in the panic report's x2..x21 (register map in
  * j96_page5_shell.S); x18 is skipped (Darwin platform register).
  */
 #include "kpf.h"
