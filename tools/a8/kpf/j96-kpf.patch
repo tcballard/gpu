@@ -1,8 +1,8 @@
-diff --git i/checkra1n/kpf/j96_page5_capture.c w/checkra1n/kpf/j96_page5_capture.c
+diff --git c/checkra1n/kpf/j96_page5_capture.c i/checkra1n/kpf/j96_page5_capture.c
 new file mode 100644
 index 0000000..53521a6
 --- /dev/null
-+++ w/checkra1n/kpf/j96_page5_capture.c
++++ i/checkra1n/kpf/j96_page5_capture.c
 @@ -0,0 +1,232 @@
 +/*
 + * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) full-state planned-panic
@@ -236,12 +236,12 @@ index 0000000..53521a6
 +        {}
 +    },
 +};
-diff --git i/checkra1n/kpf/j96_page5_shell.S w/checkra1n/kpf/j96_page5_shell.S
+diff --git c/checkra1n/kpf/j96_page5_shell.S i/checkra1n/kpf/j96_page5_shell.S
 new file mode 100644
-index 0000000..f657187
+index 0000000..1e93c63
 --- /dev/null
-+++ w/checkra1n/kpf/j96_page5_shell.S
-@@ -0,0 +1,173 @@
++++ i/checkra1n/kpf/j96_page5_shell.S
+@@ -0,0 +1,170 @@
 +/*
 + * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) full-state dump probe.
 + * Same two hooks as before, but the read hook captures the six clock pages'
