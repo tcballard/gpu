@@ -80,11 +80,8 @@ Lcap_run:
 // boot (the all-region variant faulted writing the buffer too early).
 _j96_page5_write_trace:
     ldr     x16, _j96_page5_buffer
-    cmp     w19, #0x5000                 // page 5 [0x5000, 0x6000)
-    b.lo    Lwt_chk_perf
-    cmp     w19, #0x6000
+    cmp     w19, #0x6000                 // clock pages 0-5 [0x0000, 0x6000)
     b.lo    Lwt_record
-Lwt_chk_perf:
     cmp     w19, #0x1c000                // GFX perf table [0x1c000, 0x1d000)
     b.lo    Lwt_chk_preg
     cmp     w19, #0x1d000
@@ -96,7 +93,7 @@ Lwt_chk_preg:
     b.hs    Lwt_done
 Lwt_record:
     ldr     w10, [x16, #32]             // write count (word 8)
-    cmp     w10, #64                    // cap at 64 entries
+    cmp     w10, #256                   // cap at 256 entries
     b.hs    Lwt_done
     add     x11, x16, #40               // trace base (word 10)
     add     x11, x11, x10, lsl #3
