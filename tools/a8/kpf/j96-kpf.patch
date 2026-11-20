@@ -289,7 +289,8 @@ index 0000000..f657187
 +// At entry: x20 = PMGR object, x8 = poll fn ptr, x30 = the continuation.
 +_j96_page5_poll_capture:
 +    stp     x29, x30, [sp, #-16]!
-+    ldr     x16, _j96_page5_buffer
++    adrp    x16, _j96_page5_buffer@PAGE
++    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
 +    str     x20, [x16]                  // buffer[0] = PMGR object
 +    // Early (power-gate) snapshot of the six clock pages' +0x04, so the
 +    // read-hook (post-GPC) value can be diffed against the ps_gfx-on value.
@@ -323,7 +324,8 @@ index 0000000..f657187
 +// record the early-boot ps/clock writes, so the buffer is only touched late in
 +// boot (the all-region variant faulted writing the buffer too early).
 +_j96_page5_write_trace:
-+    ldr     x16, _j96_page5_buffer
++    adrp    x16, _j96_page5_buffer@PAGE
++    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
 +    cmp     w19, #0x6000                 // clock pages 0-5 [0x0000, 0x6000)
 +    b.lo    Lwt_record
 +    cmp     w19, #0x1c000                // GFX perf table [0x1c000, 0x1d000)
@@ -350,7 +352,8 @@ index 0000000..f657187
 +
 +// --- read hook (replaces `mov w0,#0xa` after the GPC busy poll) -------------
 +_j96_page5_read:
-+    ldr     x16, _j96_page5_buffer
++    adrp    x16, _j96_page5_buffer@PAGE
++    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
 +    ldr     x0, [x16]                   // x0 = saved PMGR object
 +    ldr     w22, [x16, #8]              // capture-time page0 +0x04
 +    ldr     w23, [x16, #12]             // capture-time page1 +0x04
@@ -394,7 +397,8 @@ index 0000000..f657187
 +    // write trace: write count + the LAST recorded (offset, value) — the most
 +    // recent write, i.e. the clock-gate write during the power-on.
 +    // Reload the buffer pointer into x16 (x16 was clobbered by the +0x1c200 word).
-+    ldr     x16, _j96_page5_buffer
++    adrp    x16, _j96_page5_buffer@PAGE
++    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
 +    ldr     w28, [x16, #32]             // write count
 +    cbz     w28, Lrd_nowr
 +    sub     w9, w28, #1                 // last index = count - 1
