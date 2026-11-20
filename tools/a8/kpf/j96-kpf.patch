@@ -289,8 +289,7 @@ index 0000000..f657187
 +// At entry: x20 = PMGR object, x8 = poll fn ptr, x30 = the continuation.
 +_j96_page5_poll_capture:
 +    stp     x29, x30, [sp, #-16]!
-+    adrp    x16, _j96_page5_buffer@PAGE
-+    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
++    ldr     x16, _j96_page5_buffer
 +    str     x20, [x16]                  // buffer[0] = PMGR object
 +    // Early (power-gate) snapshot of the six clock pages' +0x04, so the
 +    // read-hook (post-GPC) value can be diffed against the ps_gfx-on value.
@@ -324,10 +323,12 @@ index 0000000..f657187
 +// record the early-boot ps/clock writes, so the buffer is only touched late in
 +// boot (the all-region variant faulted writing the buffer too early).
 +_j96_page5_write_trace:
-+    adrp    x16, _j96_page5_buffer@PAGE
-+    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
-+    cmp     w19, #0x6000                 // clock pages 0-5 [0x0000, 0x6000)
++    ldr     x16, _j96_page5_buffer
++    cmp     w19, #0x5000                 // page 5 [0x5000, 0x6000)
++    b.lo    Lwt_chk_perf
++    cmp     w19, #0x6000
 +    b.lo    Lwt_record
++Lwt_chk_perf:
 +    cmp     w19, #0x1c000                // GFX perf table [0x1c000, 0x1d000)
 +    b.lo    Lwt_chk_preg
 +    cmp     w19, #0x1d000
@@ -339,7 +340,7 @@ index 0000000..f657187
 +    b.hs    Lwt_done
 +Lwt_record:
 +    ldr     w10, [x16, #32]             // write count (word 8)
-+    cmp     w10, #256                   // cap at 256 entries
++    cmp     w10, #64                    // cap at 64 entries
 +    b.hs    Lwt_done
 +    add     x11, x16, #40               // trace base (word 10)
 +    add     x11, x11, x10, lsl #3
@@ -352,8 +353,7 @@ index 0000000..f657187
 +
 +// --- read hook (replaces `mov w0,#0xa` after the GPC busy poll) -------------
 +_j96_page5_read:
-+    adrp    x16, _j96_page5_buffer@PAGE
-+    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
++    ldr     x16, _j96_page5_buffer
 +    ldr     x0, [x16]                   // x0 = saved PMGR object
 +    ldr     w22, [x16, #8]              // capture-time page0 +0x04
 +    ldr     w23, [x16, #12]             // capture-time page1 +0x04
@@ -394,22 +394,12 @@ index 0000000..f657187
 +    add     x8, x9, #0x23, lsl #12
 +    ldr     w19, [x8, #0xc]
 +
-+    // write trace: write count + the LAST recorded (offset, value) — the most
-+    // recent write, i.e. the clock-gate write during the power-on.
++    // write trace: page-5 write count + the first recorded (offset, value).
 +    // Reload the buffer pointer into x16 (x16 was clobbered by the +0x1c200 word).
-+    adrp    x16, _j96_page5_buffer@PAGE
-+    ldr     x16, [x16, _j96_page5_buffer@PAGEOFF]
-+    ldr     w28, [x16, #32]             // write count
-+    cbz     w28, Lrd_nowr
-+    sub     w9, w28, #1                 // last index = count - 1
-+    add     x9, x16, x9, lsl #3         // x9 = x16 + (count-1)*8
-+    ldr     w20, [x9, #40]              // last write offset
-+    ldr     w21, [x9, #44]              // last write value
-+    b       Lrd_wr_done
-+Lrd_nowr:
-+    mov     w20, #0
-+    mov     w21, #0
-+Lrd_wr_done:
++    ldr     x16, _j96_page5_buffer
++    ldr     w28, [x16, #32]             // page-5 write count
++    ldr     w20, [x16, #40]             // first write offset (0 if none)
++    ldr     w21, [x16, #44]             // first write value
 +
 +    movz    x0, #0xbeef                 // magic: dump captured
 +    ldr     x1, [x0]                    // data abort -> far = 0xbeef
