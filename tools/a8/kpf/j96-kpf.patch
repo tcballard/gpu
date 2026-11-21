@@ -238,39 +238,34 @@ index 0000000..53521a6
 +};
 diff --git c/checkra1n/kpf/j96_page5_shell.S i/checkra1n/kpf/j96_page5_shell.S
 new file mode 100644
-index 0000000..70d3c2e
+index 0000000..0540bd1
 --- /dev/null
 +++ i/checkra1n/kpf/j96_page5_shell.S
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,142 @@
 +/*
-+ * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) full-state dump probe.
-+ * Same two hooks as before, but the read hook captures the six clock pages'
-+ * +0x04 (running-status) words, ps_gfx, the GFX perf-state control words,
-+ * 0x2300c and the page-5 words that differ from Linux, into x2..x21 and
-+ * faults with far = 0xbeef.
++ * J96 (iPad mini 4, A8/T7000, iPadOS 15.8.3 19H386) perf-write trace probe.
++ * Three hooks: the ps-poll capture saves the PMGR object, the generic write
++ * hook records the GFX perf-table/control and perf-regs writes (the PLL
++ * configuration), and the read hook dumps the first 11 of those writes plus
++ * the count, then faults with far = 0xbeef.
 + *
 + * Direct MMIO read (no function call, so no register clobbering):
 + *   region-0 mapped base VA is at [pmgr + 0xa70]  (regionmap(0,0)->+0x18).
 + *
 + * Register -> value map (read from the panic report's x0..x28):
-+ *   x2  = page0 +0x04   x3  = page1 +0x04   x4  = page2 +0x04   (POST-GPC)
-+ *   x5  = page3 +0x04   x6  = page4 +0x04   x7  = page5 +0x04   (POST-GPC)
-+ *   x10 = page5 +0x00   x11 = page5 +0x08   x12 = page5 +0x18
-+ *   x13 = page5 +0x1c   x14 = page5 +0x20
-+ *   x15 = ps_gfx  (PMGR +0x20320)
-+ *   x16 = +0x1c200 (GFX perf-state control)
-+ *   x17 = +0x1c300
-+ *   x19 = +0x2300c
-+ *   x20 = first clock-page write offset (0 if none)   x21 = first write value
-+ *   x22..x27 = last three clock-page writes, newest first: {offset,value} x3
-+ *   x28 = number of clock-page writes seen
++ *   x28 = perf write count
++ *   x2/x3   = w[0] {offset,value}     x4/x5   = w[1]
++ *   x6/x7   = w[2]                    x10/x11 = w[3]
++ *   x12/x13 = w[4]                    x14/x15 = w[5]
++ *   x16/x17 = w[6]                    x19/x20 = w[7]
++ *   x21/x22 = w[8]                    x23/x24 = w[9]
++ *   x25/x26 = w[10]                   x27     = w[11].offset
 + *   (x18 is skipped: it is the Darwin platform register and the panic dump
 + *    does not show the zero-extended 32-bit value for it.)
 + *   far      = 0xbeef  (dump captured)  /  0xdead  (capture hook never ran)
 + *
-+ * The PMGR offsets below (region-0 base at pmgr+0xa70, the six clock pages,
-+ * ps_gfx, perf-state control, 0x2300c) are A8/T7000-specific. To port, see the
-+ * "PORTING CONFIG" block in j96_page5_capture.c.
++ * The PMGR perf offsets (region-0 base at pmgr+0xa70) are A8/T7000-specific.
++ * To port, see the "PORTING CONFIG" block in j96_page5_capture.c.
 + *
 + * READ-ONLY: no MMIO store.
 + */
@@ -316,30 +311,28 @@ index 0000000..70d3c2e
 +
 +// --- write hook (replaces `str w21,[x8,w19,uxtw]` of the generic write) ------
 +// At entry: x8 = base VA, w19 = offset, w21 = value, x30 = the continuation.
-+// Records clock-page (0x0000-0x5fff) writes only, maintaining:
-+//   buffer[32] = count, buffer[40,44] = first {offset,value},
-+//   buffer[48..68] = ring of the last three {offset,value} (newest at [48]).
++// Records the GFX perf-table/control [0x1c000,0x1d000) and perf-regs
++// [0x28000,0x29000) writes (the PLL configuration) sequentially, cap 256:
++//   buffer[32] = count, buffer[40 + 8*i] = {offset,value} of write i.
 +_j96_page5_write_trace:
 +    ldr     x16, _j96_page5_buffer
-+    cmp     w19, #0x6000                 // clock pages 0-5 only [0x0000, 0x6000)
++    cmp     w19, #0x1c000                // perf table/control [0x1c000, 0x1d000)
++    b.lo    Lwt_done
++    cmp     w19, #0x1d000
++    b.lo    Lwt_record
++    cmp     w19, #0x28000                // perf-regs [0x28000, 0x29000)
++    b.lo    Lwt_done
++    cmp     w19, #0x29000
 +    b.hs    Lwt_done
-+    ldr     w10, [x16, #32]             // count
-+    cbnz    w10, Lwt_rotate
-+    str     w19, [x16, #40]             // first offset
-+    str     w21, [x16, #44]             // first value
-+Lwt_rotate:
-+    ldr     w9,  [x16, #56]             // ring[1].offset -> ring[2].offset
-+    str     w9,  [x16, #64]
-+    ldr     w9,  [x16, #60]             // ring[1].value -> ring[2].value
-+    str     w9,  [x16, #68]
-+    ldr     w9,  [x16, #48]             // ring[0].offset -> ring[1].offset
-+    str     w9,  [x16, #56]
-+    ldr     w9,  [x16, #52]             // ring[0].value -> ring[1].value
-+    str     w9,  [x16, #60]
-+    str     w19, [x16, #48]             // new -> ring[0].offset
-+    str     w21, [x16, #52]             // new -> ring[0].value
++Lwt_record:
++    ldr     w10, [x16, #32]             // write count
++    cmp     w10, #256                   // cap at 256 entries
++    b.hs    Lwt_done
++    add     x11, x16, #40               // trace base (word 10)
++    add     x11, x11, x10, lsl #3
++    stp     w19, w21, [x11]             // record {offset, value}
 +    add     w10, w10, #1
-+    str     w10, [x16, #32]             // count++
++    str     w10, [x16, #32]
 +Lwt_done:
 +    str     w21, [x8, w19, uxtw]        // the original write
 +    ret
@@ -348,57 +341,34 @@ index 0000000..70d3c2e
 +_j96_page5_read:
 +    ldr     x16, _j96_page5_buffer
 +    ldr     x0, [x16]                   // x0 = saved PMGR object
-+    ldr     w22, [x16, #8]              // capture-time page0 +0x04
-+    ldr     w23, [x16, #12]             // capture-time page1 +0x04
-+    ldr     w24, [x16, #16]             // capture-time page2 +0x04
-+    ldr     w25, [x16, #20]             // capture-time page3 +0x04
-+    ldr     w26, [x16, #24]             // capture-time page4 +0x04
-+    ldr     w27, [x16, #28]             // capture-time page5 +0x04
 +    cbz     x0, Lnot_captured
-+    ldr     x9, [x0, #0xa70]            // x9 = region-0 mapped base VA
++    ldr     x9, _j96_page5_buffer       // x9 = buffer pointer (stable base)
 +
-+    // six clock pages' +0x04 (running status); pages 0-3 via x9 directly
-+    ldr     w2,  [x9, #0x004]           // page0 +0x04
-+    ldr     w3,  [x9, #0x1004]          // page1 +0x04
-+    ldr     w4,  [x9, #0x2004]          // page2 +0x04
-+    ldr     w5,  [x9, #0x3004]          // page3 +0x04
-+    add     x8, x9, #0x4, lsl #12       // page4 base
-+    ldr     w6,  [x8, #0x04]            // page4 +0x04
-+    add     x8, x9, #0x5, lsl #12       // page5 base
-+    ldr     w7,  [x8, #0x04]            // page5 +0x04
-+
-+    // page-5 words that differ from Linux
-+    ldr     w10, [x8, #0x00]            // page5 +0x00
-+    ldr     w11, [x8, #0x08]            // page5 +0x08
-+    ldr     w12, [x8, #0x18]            // page5 +0x18
-+    ldr     w13, [x8, #0x1c]            // page5 +0x1c
-+    ldr     w14, [x8, #0x20]            // page5 +0x20
-+
-+    // ps_gfx = base + 0x20320
-+    add     x8, x9, #0x20, lsl #12
-+    ldr     w15, [x8, #0x320]
-+
-+    // GFX perf-state control = base + 0x1c200, +0x1c300
-+    add     x8, x9, #0x1c, lsl #12
-+    ldr     w16, [x8, #0x200]
-+    ldr     w17, [x8, #0x300]
-+
-+    // 0x2300c
-+    add     x8, x9, #0x23, lsl #12
-+    ldr     w19, [x8, #0xc]
-+
-+    // write trace: clock-page write count + first + last three.
-+    // Reload the buffer pointer into x16 (x16 was clobbered by the +0x1c200 word).
-+    ldr     x16, _j96_page5_buffer
-+    ldr     w28, [x16, #32]             // clock-page write count
-+    ldr     w20, [x16, #40]             // first write offset (0 if none)
-+    ldr     w21, [x16, #44]             // first write value
-+    ldr     w22, [x16, #48]             // last write offset (newest)
-+    ldr     w23, [x16, #52]             // last write value
-+    ldr     w24, [x16, #56]             // 2nd-newest write offset
-+    ldr     w25, [x16, #60]             // 2nd-newest write value
-+    ldr     w26, [x16, #64]             // 3rd-newest write offset
-+    ldr     w27, [x16, #68]             // 3rd-newest write value
++    // write trace: perf write count + the first 11 recorded {offset,value}.
++    ldr     w28, [x9, #32]              // write count
++    ldr     w2,  [x9, #40]              // w[0].offset
++    ldr     w3,  [x9, #44]              // w[0].value
++    ldr     w4,  [x9, #48]              // w[1].offset
++    ldr     w5,  [x9, #52]              // w[1].value
++    ldr     w6,  [x9, #56]              // w[2].offset
++    ldr     w7,  [x9, #60]              // w[2].value
++    ldr     w10, [x9, #64]              // w[3].offset
++    ldr     w11, [x9, #68]              // w[3].value
++    ldr     w12, [x9, #72]              // w[4].offset
++    ldr     w13, [x9, #76]              // w[4].value
++    ldr     w14, [x9, #80]              // w[5].offset
++    ldr     w15, [x9, #84]              // w[5].value
++    ldr     w16, [x9, #88]              // w[6].offset
++    ldr     w17, [x9, #92]              // w[6].value
++    ldr     w19, [x9, #96]              // w[7].offset
++    ldr     w20, [x9, #100]             // w[7].value
++    ldr     w21, [x9, #104]             // w[8].offset
++    ldr     w22, [x9, #108]             // w[8].value
++    ldr     w23, [x9, #112]             // w[9].offset
++    ldr     w24, [x9, #116]             // w[9].value
++    ldr     w25, [x9, #120]             // w[10].offset
++    ldr     w26, [x9, #124]             // w[10].value
++    ldr     w27, [x9, #128]             // w[11].offset
 +
 +    movz    x0, #0xbeef                 // magic: dump captured
 +    ldr     x1, [x0]                    // data abort -> far = 0xbeef
