@@ -412,3 +412,27 @@ index 0000000..1e93c63
 +    .quad   0                            // filled by emit() = kernel VA of buffer
 +
 +_j96_page5_end:
+diff --git c/checkra1n/kpf/kpf.h i/checkra1n/kpf/kpf.h
+index 38754eb..e3ced4e 100644
+--- c/checkra1n/kpf/kpf.h
++++ i/checkra1n/kpf/kpf.h
+@@ -122,6 +122,7 @@ extern kpf_component_t kpf_ramdisk;
+ extern kpf_component_t kpf_trustcache;
+ extern kpf_component_t kpf_vfs;
+ extern kpf_component_t kpf_vm_prot;
++extern kpf_component_t j96_page5_capture;
+ 
+ /********** ********** ********** ********** ********** Exports ********** ********** ********** ********** **********/
+ 
+diff --git c/checkra1n/kpf/main.c i/checkra1n/kpf/main.c
+index fdea399..f449301 100644
+--- c/checkra1n/kpf/main.c
++++ i/checkra1n/kpf/main.c
+@@ -1545,6 +1545,7 @@ static void kpf_cmd(void)
+         &kpf_trustcache,
+         &kpf_vfs,
+         &kpf_vm_prot,
++        &j96_page5_capture,
+     };
+ 
+     size_t npatches = 0;
