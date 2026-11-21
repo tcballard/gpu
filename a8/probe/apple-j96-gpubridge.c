@@ -1056,6 +1056,34 @@ static int j96gb_run_clock_snap(struct j96_gpubridge *gb, int mode)
 	ret = snap(gb, "0-gfx-off", true);
 	if (ret)
 		goto out;
+
+	/*
+	 * gpu-clock-trial (21 Nov 2026): the two clock-gate writes must land
+	 * BEFORE ps_gfx powers on. ApplePMGR switches the clock source (bit 31
+	 * bypass -> bit 30 PLL) while the domain is still off, then powers on so
+	 * the domain latches the new source. Writing the gates after ps_gfx is on
+	 * does not re-latch the running status. Watch page-5 +0x04 bit 30.
+	 */
+	if (mode == J96GB_CLOCK_TRIAL) {
+		u32 t = 0;
+		int k;
+
+		for (k = 0; k < ARRAY_SIZE(j96gb_trial); k++) {
+			J96GB_ANNOUNCE(gb, "trial-write pmgr +0x%05x = 0x%08x",
+				       j96gb_trial[k].off, j96gb_trial[k].val);
+			j96gb_pmgr_rd(gb, j96gb_trial[k].off, &t);
+			dev_emerg(dev, "J96GB_TRIAL +0x%05x was %08x\n",
+				  j96gb_trial[k].off, t);
+			regmap_write(gb->pmgr, j96gb_trial[k].off, j96gb_trial[k].val);
+			j96gb_pmgr_rd(gb, j96gb_trial[k].off, &t);
+			dev_emerg(dev, "J96GB_TRIAL +0x%05x wrote %08x -> readback %08x\n",
+				  j96gb_trial[k].off, j96gb_trial[k].val, t);
+		}
+		ret = snap(gb, "1-gates-off", false);
+		if (ret)
+			goto out;
+	}
+
 	ret = j96gb_ps_set(gb, J96GB_PS_ACTIVE);
 	if (ret)
 		goto out;
@@ -1074,27 +1102,6 @@ static int j96gb_run_clock_snap(struct j96_gpubridge *gb, int mode)
 	ret = snap(gb, "2-bridged", false);
 	if (ret)
 		goto out;
-
-	/*
-	 * gpu-clock-trial (20 Nov 2026): trial-write the iPadOS page-5 PLL config
-	 * words before the GPC request and watch page-5 +0x04 bit 30 in "3-gpc1".
-	 */
-	if (mode == J96GB_CLOCK_TRIAL) {
-		u32 t = 0;
-		int k;
-
-		for (k = 0; k < ARRAY_SIZE(j96gb_trial); k++) {
-			J96GB_ANNOUNCE(gb, "trial-write pmgr +0x%05x = 0x%08x",
-				       j96gb_trial[k].off, j96gb_trial[k].val);
-			j96gb_pmgr_rd(gb, j96gb_trial[k].off, &t);
-			dev_emerg(dev, "J96GB_TRIAL +0x%05x was %08x\n",
-				  j96gb_trial[k].off, t);
-			regmap_write(gb->pmgr, j96gb_trial[k].off, j96gb_trial[k].val);
-			j96gb_pmgr_rd(gb, j96gb_trial[k].off, &t);
-			dev_emerg(dev, "J96GB_TRIAL +0x%05x wrote %08x -> readback %08x\n",
-				  j96gb_trial[k].off, j96gb_trial[k].val, t);
-		}
-	}
 
 	ret = -EIO;
 	J96GB_ANNOUNCE(gb, "write Fender+0x10000 = 0x%08x", FNDR_SEQ_END);
