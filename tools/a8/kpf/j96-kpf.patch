@@ -238,7 +238,7 @@ index 0000000..53521a6
 +};
 diff --git c/checkra1n/kpf/j96_page5_shell.S i/checkra1n/kpf/j96_page5_shell.S
 new file mode 100644
-index 0000000..0540bd1
+index 0000000..4ae1269
 --- /dev/null
 +++ i/checkra1n/kpf/j96_page5_shell.S
 @@ -0,0 +1,142 @@
@@ -254,12 +254,14 @@ index 0000000..0540bd1
 + *
 + * Register -> value map (read from the panic report's x0..x28):
 + *   x28 = perf write count
-+ *   x2/x3   = w[0] {offset,value}     x4/x5   = w[1]
-+ *   x6/x7   = w[2]                    x10/x11 = w[3]
-+ *   x12/x13 = w[4]                    x14/x15 = w[5]
-+ *   x16/x17 = w[6]                    x19/x20 = w[7]
-+ *   x21/x22 = w[8]                    x23/x24 = w[9]
-+ *   x25/x26 = w[10]                   x27     = w[11].offset
++ *   first five writes:
++ *     x2/x3   = w[0] {offset,value}     x4/x5   = w[1]
++ *     x6/x7   = w[2]                    x10/x11 = w[3]
++ *     x12/x13 = w[4]
++ *   last six writes (newest first):
++ *     x14/x15 = last     (count-1)      x16/x17 = count-2
++ *     x19/x20 = count-3                 x21/x22 = count-4
++ *     x23/x24 = count-5                 x25/x26 = count-6
 + *   (x18 is skipped: it is the Darwin platform register and the panic dump
 + *    does not show the zero-extended 32-bit value for it.)
 + *   far      = 0xbeef  (dump captured)  /  0xdead  (capture hook never ran)
@@ -344,8 +346,9 @@ index 0000000..0540bd1
 +    cbz     x0, Lnot_captured
 +    ldr     x9, _j96_page5_buffer       // x9 = buffer pointer (stable base)
 +
-+    // write trace: perf write count + the first 11 recorded {offset,value}.
++    // write trace: perf write count + first 5 + last 6 recorded {offset,value}.
 +    ldr     w28, [x9, #32]              // write count
++    // first five writes
 +    ldr     w2,  [x9, #40]              // w[0].offset
 +    ldr     w3,  [x9, #44]              // w[0].value
 +    ldr     w4,  [x9, #48]              // w[1].offset
@@ -356,19 +359,16 @@ index 0000000..0540bd1
 +    ldr     w11, [x9, #68]              // w[3].value
 +    ldr     w12, [x9, #72]              // w[4].offset
 +    ldr     w13, [x9, #76]              // w[4].value
-+    ldr     w14, [x9, #80]              // w[5].offset
-+    ldr     w15, [x9, #84]              // w[5].value
-+    ldr     w16, [x9, #88]              // w[6].offset
-+    ldr     w17, [x9, #92]              // w[6].value
-+    ldr     w19, [x9, #96]              // w[7].offset
-+    ldr     w20, [x9, #100]             // w[7].value
-+    ldr     w21, [x9, #104]             // w[8].offset
-+    ldr     w22, [x9, #108]             // w[8].value
-+    ldr     w23, [x9, #112]             // w[9].offset
-+    ldr     w24, [x9, #116]             // w[9].value
-+    ldr     w25, [x9, #120]             // w[10].offset
-+    ldr     w26, [x9, #124]             // w[10].value
-+    ldr     w27, [x9, #128]             // w[11].offset
++    // last six writes: entry i is at buffer[40 + 8*i]; last is at 32 + 8*count.
++    lsl     x8, x28, #3                 // 8*count
++    add     x8, x8, #32                 // + 32
++    add     x8, x9, x8                  // x8 = &entry[count-1]
++    ldp     w14, w15, [x8]              // last     {offset,value} (count-1)
++    ldp     w16, w17, [x8, #-8]!        // 2nd-last (count-2)
++    ldp     w19, w20, [x8, #-8]!        // 3rd-last (count-3)
++    ldp     w21, w22, [x8, #-8]!        // 4th-last (count-4)
++    ldp     w23, w24, [x8, #-8]!        // 5th-last (count-5)
++    ldp     w25, w26, [x8, #-8]!        // 6th-last (count-6)
 +
 +    movz    x0, #0xbeef                 // magic: dump captured
 +    ldr     x1, [x0]                    // data abort -> far = 0xbeef
