@@ -111,7 +111,7 @@
 #include <linux/sysfs.h>
 
 enum { J96GB_WRITE = 1, J96GB_ID_AUTO, J96GB_ID, J96GB_READBACK, J96GB_AUTO_WATCH, J96GB_FENDER_SCAN, J96GB_CLOCK_SNAP,
-       J96GB_CLOCK_WIDE, J96GB_DWI_READ, J96GB_DWI_CLOCK, J96GB_HANDOFF_SNAP, J96GB_CLOCK_TRIAL };
+       J96GB_CLOCK_WIDE, J96GB_DWI_READ, J96GB_DWI_CLOCK, J96GB_HANDOFF_SNAP, J96GB_CLOCK_TRIAL, J96GB_MBOX_READ };
 static const char *const j96gb_tokens[] = {
 	[J96GB_WRITE] = "gpu-bridge-write",
 	[J96GB_ID_AUTO] = "gpu-bridge-id-auto",
@@ -125,6 +125,7 @@ static const char *const j96gb_tokens[] = {
 	[J96GB_DWI_CLOCK] = "gpu-dwi-ios-clock",
 	[J96GB_HANDOFF_SNAP] = "gpu-pmgr-handoff-snap",
 	[J96GB_CLOCK_TRIAL] = "gpu-clock-trial",
+	[J96GB_MBOX_READ] = "gpu-mailbox-read",
 };
 
 /* PMGR power-state register (drivers/pmdomain/apple/pmgr-pwrstate.c). */
@@ -934,9 +935,21 @@ static const struct { u32 start, words; } j96gb_wide_regions[] = {
 };
 #define J96GB_WIDE_WORDS (6 * 16 + 4 * 64 + 16)
 
-/* gpu-clock-trial candidates: 0x2300c differs (Linux 0 vs iPadOS 0x15f at post-poll). */
-#define J96GB_TRIAL_REG		0x2300c
-#define J96GB_TRIAL_VAL		0x15f
+/*
+ * gpu-clock-trial candidates (21 Nov 2026): the two clock-gate writes iPadOS
+ * performs to bring up the GPU PLL (page-5 +0x04 bit 30), captured by the KPF
+ * write-trace at the post-GPC point (only two clock-page writes in the whole
+ * boot):
+ *   pmgr+0x1008 = 0x40480348  (clock page 1 gate, written first)
+ *   pmgr+0x4008 = 0x48480348  (clock page 4 gate, written last)
+ * Linux leaves these at boot values; trial-write both before the GPC request
+ * and watch page-5 +0x04 bit 30 in "3-gpc1". These are page-1/page-4 writes
+ * (not page 5), values observed, not guessed.
+ */
+static const struct j96gb_pair j96gb_trial[] = {
+	{ 0x1008, 0x40480348 },
+	{ 0x4008, 0x48480348 },
+};
 static u32 j96gb_wide_base[J96GB_WIDE_WORDS], j96gb_wide_cur[J96GB_WIDE_WORDS];
 
 static int j96gb_clock_wide(struct j96_gpubridge *gb, const char *when, bool first)
@@ -1063,21 +1076,24 @@ static int j96gb_run_clock_snap(struct j96_gpubridge *gb, int mode)
 		goto out;
 
 	/*
-	 * gpu-clock-trial (19 Nov 2026): empirical test for the missing page-5
-	 * bit-30 write. 0x2300c differs between Linux (0) and iPadOS (0x15f) at
-	 * the post-poll point, so trial-write the iPadOS value before the GPC
-	 * request and watch whether page-5 +0x04 bit 30 comes up in "3-gpc1".
-	 * Change TRIAL_REG/TRIAL_VAL to test other candidates.
+	 * gpu-clock-trial (20 Nov 2026): trial-write the iPadOS page-5 PLL config
+	 * words before the GPC request and watch page-5 +0x04 bit 30 in "3-gpc1".
 	 */
 	if (mode == J96GB_CLOCK_TRIAL) {
 		u32 t = 0;
-		J96GB_ANNOUNCE(gb, "trial-write pmgr +0x%05x = 0x%08x", J96GB_TRIAL_REG, J96GB_TRIAL_VAL);
-		j96gb_pmgr_rd(gb, J96GB_TRIAL_REG, &t);
-		dev_emerg(dev, "J96GB_TRIAL +0x%05x was %08x\n", J96GB_TRIAL_REG, t);
-		regmap_write(gb->pmgr, J96GB_TRIAL_REG, J96GB_TRIAL_VAL);
-		j96gb_pmgr_rd(gb, J96GB_TRIAL_REG, &t);
-		dev_emerg(dev, "J96GB_TRIAL +0x%05x wrote %08x -> readback %08x\n",
-			  J96GB_TRIAL_REG, J96GB_TRIAL_VAL, t);
+		int k;
+
+		for (k = 0; k < ARRAY_SIZE(j96gb_trial); k++) {
+			J96GB_ANNOUNCE(gb, "trial-write pmgr +0x%05x = 0x%08x",
+				       j96gb_trial[k].off, j96gb_trial[k].val);
+			j96gb_pmgr_rd(gb, j96gb_trial[k].off, &t);
+			dev_emerg(dev, "J96GB_TRIAL +0x%05x was %08x\n",
+				  j96gb_trial[k].off, t);
+			regmap_write(gb->pmgr, j96gb_trial[k].off, j96gb_trial[k].val);
+			j96gb_pmgr_rd(gb, j96gb_trial[k].off, &t);
+			dev_emerg(dev, "J96GB_TRIAL +0x%05x wrote %08x -> readback %08x\n",
+				  j96gb_trial[k].off, j96gb_trial[k].val, t);
+		}
 	}
 
 	ret = -EIO;
@@ -1255,6 +1271,45 @@ static int j96gb_run_handoff_snap(struct j96_gpubridge *gb)
 	return ret ? -EIO : 0;
 }
 
+/* --------------------------------------------------------------------------
+ * gpu-mailbox-read (20 Nov 2026): the go/no-go for the GPC firmware upload.
+ *
+ * The GPC microcode (com.apple.AGXFirmwareKextG4P blob) is uploaded through an
+ * indirect register-access mailbox at RGX +0xa00/+0xa08/+0xa10/+0xa18
+ * (base 0x201000000): write the RGX-core register address to +0xa10, the value
+ * to +0xa08, poll +0xa18 for 0x05000000, read +0xa00 for the result. iPadOS
+ * reads this mailbox before the Fender power-on, so it should be a safe
+ * host-facing block — but it has never been read under Linux (the only RGX
+ * reads tried, +0x18/+0x20, froze the SoC).
+ *
+ * This token reads ONE register, +0xa18 (busy/status), with ps_gfx on and
+ * nothing else: no bridges, no Fender, no identity reads. A hang here means
+ * the mailbox is inside the powered-down core and the upload cannot be done
+ * under Linux as-is.
+ * ------------------------------------------------------------------------ */
+
+#define J96GB_MBOX_BUSY	0xa18	/* firmware mailbox busy/status (poll 0x05000000) */
+
+static int j96gb_run_mbox_read(struct j96_gpubridge *gb)
+{
+	struct device *dev = gb->dev;
+	u32 v;
+	int ret;
+
+	dev_emerg(dev, "J96GB_BEGIN %s (one RGX mailbox read; no bridges, no Fender)\n",
+		  j96gb_tokens[J96GB_MBOX_READ]);
+
+	ret = j96gb_ps_set(gb, J96GB_PS_ACTIVE);
+	if (ret)
+		return ret;
+
+	J96GB_ANNOUNCE(gb, "read RGX+0x%04x (firmware mailbox busy)", J96GB_MBOX_BUSY);
+	v = readl(gb->rgx + J96GB_MBOX_BUSY);
+	dev_emerg(dev, "J96GB_MBOX RGX+0x%04x = 0x%08x\n", J96GB_MBOX_BUSY, v);
+
+	return j96gb_power_down(gb, J96GB_MBOX_READ, false, 0);
+}
+
 static bool j96gb_ps_off(u32 v)
 {
 	return !FIELD_GET(J96GB_PS_TARGET, v) && !FIELD_GET(J96GB_PS_ACTUAL, v) &&
@@ -1307,6 +1362,9 @@ static ssize_t attempt_store(struct device *dev, struct device_attribute *attr,
 			break;
 		case J96GB_HANDOFF_SNAP:
 			ret = j96gb_run_handoff_snap(gb);
+			break;
+		case J96GB_MBOX_READ:
+			ret = j96gb_run_mbox_read(gb);
 			break;
 		default:
 			ret = j96gb_run(gb, mode);
