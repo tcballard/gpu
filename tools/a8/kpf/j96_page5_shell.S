@@ -17,11 +17,9 @@
  *   x16 = +0x1c200 (GFX perf-state control)
  *   x17 = +0x1c300
  *   x19 = +0x2300c
- *   x20 = first page-5 write offset (0 if none)   x21 = first write value
- *   x22..x27 = page0..page5 +0x04 at the CAPTURE hook (ps_gfx power-on, early),
- *              diffed against x2..x7 (post-GPC) to show when bit 30 comes up.
- *   x28 = number of page-5 writes seen (0 = page 5 is a hardware status, never
- *         written by any driver during the power-on)
+ *   x20 = first clock-page write offset (0 if none)   x21 = first write value
+ *   x22..x27 = last three clock-page writes, newest first: {offset,value} x3
+ *   x28 = number of clock-page writes seen
  *   (x18 is skipped: it is the Darwin platform register and the panic dump
  *    does not show the zero-extended 32-bit value for it.)
  *   far      = 0xbeef  (dump captured)  /  0xdead  (capture hook never ran)
@@ -74,32 +72,30 @@ Lcap_run:
 
 // --- write hook (replaces `str w21,[x8,w19,uxtw]` of the generic write) ------
 // At entry: x8 = base VA, w19 = offset, w21 = value, x30 = the continuation.
-// Records writes to the GPU-late PMGR regions only (page 5, the GFX perf table
-// 0x1c000-0x1d000, and the perf-regs 0x28000-0x29000). It deliberately does NOT
-// record the early-boot ps/clock writes, so the buffer is only touched late in
-// boot (the all-region variant faulted writing the buffer too early).
+// Records clock-page (0x0000-0x5fff) writes only, maintaining:
+//   buffer[32] = count, buffer[40,44] = first {offset,value},
+//   buffer[48..68] = ring of the last three {offset,value} (newest at [48]).
 _j96_page5_write_trace:
     ldr     x16, _j96_page5_buffer
-    cmp     w19, #0x6000                 // clock pages 0-5 [0x0000, 0x6000)
-    b.lo    Lwt_record
-    cmp     w19, #0x1c000                // GFX perf table [0x1c000, 0x1d000)
-    b.lo    Lwt_chk_preg
-    cmp     w19, #0x1d000
-    b.lo    Lwt_record
-Lwt_chk_preg:
-    cmp     w19, #0x28000                // perf-regs [0x28000, 0x29000)
-    b.lo    Lwt_done
-    cmp     w19, #0x29000
+    cmp     w19, #0x6000                 // clock pages 0-5 only [0x0000, 0x6000)
     b.hs    Lwt_done
-Lwt_record:
-    ldr     w10, [x16, #32]             // write count (word 8)
-    cmp     w10, #256                   // cap at 256 entries
-    b.hs    Lwt_done
-    add     x11, x16, #40               // trace base (word 10)
-    add     x11, x11, x10, lsl #3
-    stp     w19, w21, [x11]             // record {offset, value}
+    ldr     w10, [x16, #32]             // count
+    cbnz    w10, Lwt_rotate
+    str     w19, [x16, #40]             // first offset
+    str     w21, [x16, #44]             // first value
+Lwt_rotate:
+    ldr     w9,  [x16, #56]             // ring[1].offset -> ring[2].offset
+    str     w9,  [x16, #64]
+    ldr     w9,  [x16, #60]             // ring[1].value -> ring[2].value
+    str     w9,  [x16, #68]
+    ldr     w9,  [x16, #48]             // ring[0].offset -> ring[1].offset
+    str     w9,  [x16, #56]
+    ldr     w9,  [x16, #52]             // ring[0].value -> ring[1].value
+    str     w9,  [x16, #60]
+    str     w19, [x16, #48]             // new -> ring[0].offset
+    str     w21, [x16, #52]             // new -> ring[0].value
     add     w10, w10, #1
-    str     w10, [x16, #32]
+    str     w10, [x16, #32]             // count++
 Lwt_done:
     str     w21, [x8, w19, uxtw]        // the original write
     ret
@@ -147,12 +143,18 @@ _j96_page5_read:
     add     x8, x9, #0x23, lsl #12
     ldr     w19, [x8, #0xc]
 
-    // write trace: page-5 write count + the first recorded (offset, value).
+    // write trace: clock-page write count + first + last three.
     // Reload the buffer pointer into x16 (x16 was clobbered by the +0x1c200 word).
     ldr     x16, _j96_page5_buffer
-    ldr     w28, [x16, #32]             // page-5 write count
+    ldr     w28, [x16, #32]             // clock-page write count
     ldr     w20, [x16, #40]             // first write offset (0 if none)
     ldr     w21, [x16, #44]             // first write value
+    ldr     w22, [x16, #48]             // last write offset (newest)
+    ldr     w23, [x16, #52]             // last write value
+    ldr     w24, [x16, #56]             // 2nd-newest write offset
+    ldr     w25, [x16, #60]             // 2nd-newest write value
+    ldr     w26, [x16, #64]             // 3rd-newest write offset
+    ldr     w27, [x16, #68]             // 3rd-newest write value
 
     movz    x0, #0xbeef                 // magic: dump captured
     ldr     x1, [x0]                    // data abort -> far = 0xbeef
